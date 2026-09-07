@@ -12,7 +12,11 @@ class Evaporator:
                  liquid_level_ft=2, 
                  dessin_coefficient=18000, 
                  vapor_pressure_psia=14.7,
-                 vapor_bleed=0):
+                 vapor_bleed=0,
+                 condensate_temp_drop=False,
+                 heat_loss_percent=3.0,
+                 calandria_bleed_pec=1.0,
+                 cond_flash_to_next=False):
         self.juice_side_in = juice_side_in
         self.calandria_side = calandria_side
         self.area_ft2 = area_ft2
@@ -31,7 +35,8 @@ class Evaporator:
         self.juice_side_out.current_temp_to_bpe_plus_vapor_temp() 
         self.vapor_out = EvaporatorSteam(P_psia=self.vapor_pressure_psia, flow_lb_per_hr=0)
         self.vapor_bleed = EvaporatorSteam(P_psia=self.vapor_pressure_psia, flow_lb_per_hr=vapor_bleed)
-    
+        self.condensate_temp_drop = condensate_temp_drop # true or false
+
     def _initial_brix_guess_out(self):
         """Calculate an initial guess for the outlet brix using the heat duty and latent heat"""
         flow_out_lb_per_hr_initial = self.juice_side_in.flow_lb_per_hr - self.calandria_side.flow_lb_per_hr 
@@ -63,7 +68,15 @@ class Evaporator:
         cp_juice = self.juice_side_in.cp_btu_per_lb_deg_F
         heat_from_flash = self.juice_side_in.flow_lb_per_hr * cp_juice * juice_side_temp_rise
         return heat_from_flash
-    
+
+    @property
+    def condensate_temperature(self):
+        T_stm = self.calandria_side.sat_temp_deg_F
+        T_j = self.juice_side_out.temp_deg_F
+        temp_drop = T_stm - 0.4 * (T_stm - T_j)
+        cond_temp = T_stm - temp_drop
+        return cond_temp if self.condensate_temp_drop == True else T_stm
+        
     @property
     def heat_available_for_evaporation(self):
         """Calculate the heat available for evaporation"""
@@ -173,22 +186,22 @@ class Evaporator:
         print(f"Available for Evaporation: {self.heat_duty_btu_per_hr:,.2f} + {self.heat_from_flash:,.2f} = {self.heat_available_for_evaporation:,.2f} BTU/hr")
 
 # Test below, unwrap to see outputs
-"""
-clear_juice = SugarStream(brix=14, purity=90, flow_lb_per_hr=1_000_000, temp_deg_F=225, pressure_psia=60, level_ft=0)
-exhaust_steam_evaporator = EvaporatorSteam(P_psia=30, flow_lb_per_hr=100000)
-evaporator = Evaporator(
-    juice_side_in=clear_juice,
-    calandria_side=exhaust_steam_evaporator,
-    area_ft2=25000,
-    liquid_level_ft=2,
-    dessin_coefficient=18000,
-    vapor_pressure_psia=25
-)
+if __name__ == "__main__":
+    clear_juice = SugarStream(brix=14, purity=90, flow_lb_per_hr=1_000_000, temp_deg_F=225, pressure_psia=60, level_ft=0)
+    exhaust_steam_evaporator = EvaporatorSteam(P_psia=30, flow_lb_per_hr=100000)
+    evaporator = Evaporator(
+        juice_side_in=clear_juice,
+        calandria_side=exhaust_steam_evaporator,
+        area_ft2=25000,
+        liquid_level_ft=2,
+        dessin_coefficient=18000,
+        vapor_pressure_psia=25
+    )
 
-evaporator.solve()
-evaporator.display_properties()
-print("\n adjusting vapor pressure \n")
-evaporator.vapor_pressure_psia = 22
-evaporator.solve()
-evaporator.display_properties()
-"""
+    evaporator.solve()
+    evaporator.display_properties()
+    print("\n adjusting vapor pressure \n")
+    evaporator.vapor_pressure_psia = 22
+    evaporator.solve()
+    evaporator.display_properties()
+

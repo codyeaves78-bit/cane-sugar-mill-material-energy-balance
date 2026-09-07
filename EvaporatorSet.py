@@ -85,11 +85,14 @@ class EvaporatorSet:
                  target_brix_out=65,
                  effect_areas_ft2=[1000, 1000, 1000],
                  vapor_bleeds=[0, 0],
+                 incond_gas_bleed_percent=1.0,
+                 heat_loss_percent=[3.0, 2.5, 2.0], # descends along each effect
+                 recover_condensate_flash=False,
                  dessin_coefficient=18000,
                  liquid_level_ft=2,
                  injection_water_temp_F=90,
                  condenser_leg_temp_drop_F=5,
-                 name: str = 'Evaporator Set'):
+                 name: str = 'Evaporator Set',):
         """initialize class"""
         self.name = name
         self.juice_in = juice_in
@@ -103,6 +106,9 @@ class EvaporatorSet:
         self.injection_water_temp_F = injection_water_temp_F
         self.condenser_leg_temp_drop_F = condenser_leg_temp_drop_F # degrees below the vapor temp
         self.number_of_effects = len(self.effect_areas_ft2)
+        self.incond_gas_bleed_percent = incond_gas_bleed_percent
+        self.heat_loss_percent = heat_loss_percent
+        self.recover_condensate_flash = recover_condensate_flash
         # 1. Package the shared arguments into a temporary dictionary
         evap_args = {
             "juice_in_lb_per_hr": self.juice_in.flow_lb_per_hr,
@@ -163,6 +169,27 @@ class EvaporatorSet:
             vapor_to_next = self.evaporator_list[i].lbs_evaporated_per_hr - self.evaporator_list[i].vapor_bleed.flow_lb_per_hr
             self.evaporator_list[i+1].calandria_side.flow_lb_per_hr = vapor_to_next
         self.update_set()
+        # thoughts, I think to implement the new changes for heat loss and gas bleeds
+        # I think maybe the calandria side steam flow will be supply steam - supply steam * percent bled
+        # do that for each one
+        # The heat loss will only be taken for the vapor space
+        # so it is assumed the calandria is well insulated and negligible heat loss
+        # comes from the calandria
+        # this means we only need to account for heat losses after the first effect
+        # so after effect one, we will say Q available = L (steam in - bleed) * (1 - loss%/100)
+        # So with this in mind, we will ignore this for the vapors going to condensors
+        # becuase this only slightly changes the water needed for the condensor
+        # this is also how Hugot explains heat losses
+        # also note that losses decrease along the set because they get colder
+        # now condensate flash will be done like this
+        # T cond = T_cal - 0.4 * (T_cal - T_juice) : a formula from https://www.sugarprocesstech.com/flash-vapour-calculation/
+        # this would need to be implemented in the Evaporator Object itself
+        # program in a condensate temp drop True or False
+        # actually, I think everything should be implemented on the Evaporator class level
+        # just note that the heat loss list must start with a 0, becuase 
+        # this only affects the effect after the first effect
+        # Joke: what effect would effect 1 have on effect 2 while effectively bleeding effect 1 gases?
+        # Answer: effectively just a little bit
 
     def update_set(self):
         for i in range(self.number_of_effects):
