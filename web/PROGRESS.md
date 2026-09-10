@@ -1,0 +1,216 @@
+# Web App Port — Progress & Plan
+
+**Goal:** rebuild this entire Streamlit/Python mill balance app (`streamlit_app.py`,
+and the ~30 domain classes it drives) as a single self-contained, fully
+offline `.html` file (`web/index.html`) for easy distribution — open it in
+any browser, no server, no install. Requested by the user 2026-09-10.
+
+Read this file fully before doing anything else in a new session. It is the
+only thing carrying context between sessions — this port spans many
+independent daily working sessions (see "Working agreement" below), each of
+which starts with zero memory of prior ones.
+
+## Working agreement (confirmed with user 2026-09-10)
+
+- **Scope order:** MVP first. Get a usable end-to-end pipeline (Mill Floor →
+  Clarification → Juice Heating → Boiler/Turbines) working before circling
+  back for Pan Floor, Evaporation, Cooling Tower, Condensate Balance, PFD
+  diagrams, and Excel export. Don't try to do everything before anything is
+  usable.
+- **Fully offline:** no CDN scripts. Everything — steam tables, diagrams,
+  export — is embedded in the one `.html` file. It must open and fully
+  function from a `file://` URL with no internet connection.
+- **Cadence:** an autonomous scheduled cloud routine runs every evening
+  (~6pm America/Chicago) on branch `webapp-port` of this repo
+  (`https://github.com/codyeaves78-bit/cane-sugar-mill-material-energy-balance`).
+  It should: read this file, do the next unchecked chunk of work, validate it,
+  commit + push to `webapp-port` (never to `main` — the user merges when
+  ready), and append a dated entry to the Session Log below before finishing.
+  A meaningful milestone (end of a phase) is a good point to open/update a PR
+  to `main` for the user to review, but routine day-to-day progress should
+  just be commits on the branch.
+- Never force-push, never rewrite history on this branch, never touch `main`
+  directly.
+
+## Architecture decisions
+
+- **Source lives in `web/src/*.js` + `web/src/app.css` + `web/template.html`.**
+  `web/build.py` (pure Python, no Node needed) string-replaces marker
+  comments in the template with each source file's contents and writes
+  `web/index.html`. **Never hand-edit `web/index.html` directly** — edit the
+  source files and re-run `python web/build.py`. This keeps the single
+  deliverable file assemble-able without a JS bundler.
+- **No Node.js in this dev sandbox** (confirmed 2026-09-10 — `node`, `npm`,
+  `deno`, `bun` all absent). If a future session has Node available, great,
+  use it (`node web/dev/validate.mjs` exists for that). If not, use the
+  headless-browser trick below — it works and is already proven out.
+- **IAPWS-IF97 steam engine (`web/src/iapws97.js`) implements Regions 1, 2,
+  and 4 ONLY** (compressed liquid, superheated vapor, saturation dome).
+  Region 3 (near-critical) and Region 5 (>1073K) are deliberately NOT
+  implemented. This mill never exceeds ~950 psia / ~800°F anywhere in the
+  process — nowhere close to the ~16.5 MPa (2398 psia) / 623.15K boundary
+  where Region 3 would start to matter. Do not casually "extend to Region 3"
+  if some future input pushes past that boundary — it's a substantial
+  addition (different EOS form + iterative backward equations); re-scope
+  deliberately if it's ever actually needed.
+- **Coefficients were transcribed from the installed Python `iapws` package**
+  (`iapws97.py` / `_iapws97Constants.py` in site-packages — the same library
+  `SteamStream.py` already uses throughout this repo), not from memory. This
+  keeps the JS port numerically consistent with the existing Python domain
+  classes rather than introducing an independent (and possibly divergent)
+  implementation.
+- **`web/src/steam_stream.js`** is a thin English-unit wrapper around
+  `iapws97.js`, mirroring `SteamStream.py` property-for-property (T °F, P
+  psia, h BTU/lb, s BTU/lb·R, x, v ft³/lb, rho, h_fg, is_superheated). Every
+  future domain-class port should consume `SteamStream` the same way its
+  Python counterpart does — the API is intentionally identical so the port
+  of each class can mirror the Python source closely.
+- **UI shell (`web/src/app.js` + `app.css`):** a `TABS` array drives both the
+  nav buttons and placeholder `<section>`s. To bring a tab online: write a
+  `buildXTab()` function (see `buildSteamTab()` for the pattern), call it
+  from the `DOMContentLoaded` handler, and flip that tab's `enabled: true`.
+  Keep each tab's DOM-building + calculation logic together in one function
+  per tab for now; revisit organization if/when this gets unwieldy.
+- **Validation harness** (steam engine correctness):
+  1. `python web/dev/regenerate_reference.py` — runs Python `iapws` across
+     the mill's real operating envelope (pressures ~1–950 psia, temps to
+     ~800°F, all of TP/Ph/Ps/Px input combos, including two-phase/wet-steam
+     cases) and writes `web/dev/reference.json` + `reference.js` (the same
+     data as a `window.REFERENCE_CASES = [...]` global, since `file://` pages
+     can't reliably `fetch()` a local JSON file).
+  2. Run `web/dev/validate.html` headlessly and read its output. Exact
+     commands (Windows + git-bash; adjust the repo path if it moved):
+     ```
+     cd "c:\Python Projects\cane-sugar-mill-material-energy-balance"
+     FILEURL="file:///$(cygpath -w "$(pwd)/web/dev/validate.html" | sed 's/\\\\/\//g; s/ /%20/g')"
+     "/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" --headless=new --disable-gpu --virtual-time-budget=5000 --dump-dom "$FILEURL" 2>/dev/null > /tmp/dump.html
+     grep -n '<pre' -A 20 /tmp/dump.html
+     ```
+     (Chrome works too if Edge isn't present:
+     `/c/Program Files/Google/Chrome/Application/chrome.exe`.) The `file:///`
+     + `cygpath -w` + manual `%20`-escaping is required — a bare `$(pwd)`
+     produces a malformed URL that Edge silently mis-resolves (spent real
+     time debugging this on 2026-09-10; don't redo that detour). Delete the
+     `/tmp/dump.html` scratch file after reading it.
+  3. If Node.js IS available in the session: `node web/dev/validate.mjs` does
+     the identical check and is much less ceremony — prefer it when possible.
+  - **Current status (2026-09-10): 580/580 cases pass**, max |Δh| / |Δs| /
+    |ΔT| all at floating-point noise level (Newton-refined against the exact
+    forward equations). `SteamStream.js` cross-checked directly against live
+    `SteamStream.py` output too (see git history for the one-off check) —
+    matched to ~1e-9 relative.
+  - **Re-run this validation after ANY change to `iapws97.js`.** If a change
+    is made to widen the pressure/temperature envelope (e.g. someone adds a
+    boiler pushing past ~950 psia), widen `gen_reference.py`'s grid first,
+    regenerate, then validate — don't just trust it.
+
+## Directory map
+
+```
+web/
+  index.html            <- THE deliverable (built, don't hand-edit)
+  template.html         <- page shell with /*__MARKER__*/ placeholders
+  build.py               <- assembles index.html from template + src/
+  PROGRESS.md            <- this file
+  src/
+    iapws97.js            <- steam property engine (Regions 1,2,4)
+    steam_stream.js       <- English-unit wrapper mirroring SteamStream.py
+    app.js                <- tab shell + per-tab UI/calc logic
+    app.css               <- styling (light/dark aware)
+  dev/                    <- dev-only tooling, not shipped in index.html
+    gen_reference.py       <- generates reference.json via Python iapws
+    json_to_js.py          <- wraps reference.json as reference.js
+    regenerate_reference.py<- runs both of the above
+    reference.json/.js     <- generated (safe to regenerate, don't hand-edit)
+    validate.html           <- browser-based validation harness (see above)
+    validate.mjs            <- Node equivalent, use if Node is available
+```
+
+## Plant-wide config to promote into a shared object
+
+(from an audit of `streamlit_app.py` / `main.py` — see git log around
+2026-09-10 for the full dependency-order writeup if more detail is needed).
+These values are read by many stages and should live in one shared JS config
+object (e.g. `PlantConfig`) rather than being re-entered per tab:
+
+- `cane_tpd` (~19000), `cane_fiber_pct` (~14%) — feeds Mill Floor, Cane Prep /
+  Mill Turbines (tons fiber/hr).
+- Steam header pressures: fabrication exhaust psia (~30), V1–V4 vapor
+  headers, live/boiler steam psig (~165–185). Used almost everywhere.
+- Injection water temp (~90°F) and condenser leg ΔT (~5°F) — shared between
+  Pan Floor and Evaporation.
+- Target syrup brix (~65) — shared between Clarification output sizing, Pan
+  Floor, and Evaporation.
+- Default isentropic efficiency (~50%) — reused across all turbine groups.
+- Boiling scheme choice (FBDM / TBDM / 3-boiling single magma / 2-boiling) —
+  a structural choice, not just a number; determines which Pan Floor module
+  gets built/used.
+
+## Phase plan
+
+Mirrors the pipeline order both `main.py` and `streamlit_app.py` already
+follow. Check items off as they land; add sub-notes on tricky bits so the
+next session doesn't have to rediscover them.
+
+- [x] **Phase 0 — Steam engine foundation.** `iapws97.js`, `steam_stream.js`,
+      validation harness, UI shell + working "Steam Tables" utility tab.
+      **DONE 2026-09-10.**
+- [ ] **Phase 1 — Mill Floor + Clarification.** Port `MillFloor.py`,
+      `Clarification.py`, `Bagasse.py`, `SugarStream.py`. Build the Mill
+      Floor + Clarification tabs (inputs sidebar-equivalent + stream tables +
+      balance-check tables, mirroring `streamlit_app.py`'s Mill Floor/
+      Clarification tab sections). `MillFloor.mixed_juice_stream` feeds
+      `Clarification`; `MillFloor.bagasse_stream` will later feed the Boiler.
+- [ ] **Phase 2 — Juice Heating, Boiler, Turbines, Deaerator.** Port
+      `JuiceHeater.py` / `JuiceHeatingStation.py`, `Boiler.py`, `Turbine.py` /
+      `CogenTurbine.py`, `MillTurbines.py` / `CanePrepTurbines.py` /
+      `AuxillaryTurbines.py`, `Deaerator.py`. This closes an end-to-end MVP
+      loop (cane in → bagasse → boiler steam → turbines → exhaust) which is
+      the "usable" milestone worth a PR to `main` for the user to try.
+- [ ] **Phase 3 — Pan Floor.** The most structurally complex phase — 4
+      selectable schemes (`FourBoilingDoubleMagma`, `ThreeBoilingDoubleMagma`,
+      `ThreeBoiling`, `TwoBoiling`), each with `Pan`, `Centrifugal`,
+      `Crystallizer`, `Reheater` and scheme-specific split-fraction inputs.
+      Port one scheme fully first (suggest FBDM, since it's the default in
+      both existing entry points), get it working end to end, then add the
+      other three.
+- [ ] **Phase 4 — Evaporation.** `PreEvaporator.py` + the `EvaporatorSet`
+      family (iterative solver — check `multi_effect_solver_scipy.py` /
+      `EvaporatorSetIAPWS.py` for the exact algorithm; will need a JS
+      iterative solver, e.g. simple fixed-point or Newton, in place of scipy).
+      Depends on vapor bleed demand from Phase 2/3's steam totals.
+- [ ] **Phase 5 — Cooling Tower + Condensate Balance + Exhaust Summary
+      integration.** `CoolingTowerSystem.py`, `condensate_balance.py` /
+      `condensate_utils.py`, tying together exhaust/vapor totals across all
+      prior stages.
+- [ ] **Phase 6 — PFD diagrams.** Inline SVG per station, echoing the visual
+      language already established in the `*_diagram.py` files (tagged-arrow
+      streams, trapezoid turbine glyph, etc. — see `cogen_turbine_diagram.py`
+      for a recent example). Can be done incrementally alongside each phase
+      above rather than saved entirely for the end, if a session has spare
+      time after finishing that phase's calculations.
+- [ ] **Phase 7 — Export.** Python side uses `openpyxl` (zipped .xlsx) which
+      needs a JS zip library — against the offline/no-CDN constraint unless
+      fully vendored inline. Leaning toward hand-writing the legacy
+      **SpreadsheetML 2003 XML** format instead (plain XML, `.xls` extension,
+      Excel opens it natively, no compression/zip library needed at all —
+      fits the offline constraint far more easily). Decide for real when this
+      phase starts; CSV-per-section export is the fallback if XML output
+      proves troublesome.
+
+## Session Log
+
+- **2026-09-10** — Kicked off. Surveyed `streamlit_app.py`/`main.py` (via
+  Explore agent) to map the 11-tab pipeline, inputs, and dependency order.
+  Chose scope (MVP-first), offline-only, and autonomous daily-6pm cadence
+  with the user. Built and validated the Region 1/2/4 IAPWS-IF97 engine
+  against the installed Python `iapws` package (580 test cases, effectively
+  exact match). Built the single-file assembly pipeline (`template.html` +
+  `build.py`) and a working "Steam Tables" utility tab as the first real
+  piece of `web/index.html`. Discovered this sandbox has no Node.js;
+  worked out a headless-Edge/Chrome `--dump-dom` validation technique as the
+  fallback (documented above in detail so it isn't re-derived). Created
+  branch `webapp-port` for all of this work. Next session: start Phase 1
+  (Mill Floor + Clarification) — read `MillFloor.py` and `Clarification.py`
+  closely, port the calculations first (no UI), sanity-check numbers against
+  a `python main.py` run with matching inputs, then build the tab UI.
