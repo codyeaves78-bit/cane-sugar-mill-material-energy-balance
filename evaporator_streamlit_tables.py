@@ -109,6 +109,8 @@ def evap_set_effect_conditions_table(evap) -> pd.DataFrame:
             f"{e.calandria_side.sat_temp_deg_F:,.2f}",
             f"{e.calandria_side.h_fg:,.2f}",
             f"{e.heat_duty_btu_per_hr / 1e6:,.2f}",
+            f"{e.calandria_bleed_pec:,.2f}",
+            f"{e.heat_loss_percent:,.2f}",
             f"{e.heat_xfer_U:,.2f}",
             f"{e.dessin_U:,.2f}",
         ]
@@ -117,6 +119,7 @@ def evap_set_effect_conditions_table(evap) -> pd.DataFrame:
     index = ["Brix in", "Brix out", "Juice temp (°F)", "Syrup temp (°F)", "Juice cp", "Syrup cp",
              "Vapor P (psia)", "Vapor temp (°F)", "Vapor h_fg (BTU/lb)", "Calandria P (psia)",
              "Calandria temp (°F)", "Calandria h_fg (BTU/lb)", "Duty (MM BTU/hr)",
+             "Gas bleed (%)", "Heat loss (%)",
              "U calc (BTU/hr·ft²·°F)", "U Dessin (BTU/hr·ft²·°F)"]
     return pd.DataFrame(data, index=index)
 
@@ -129,6 +132,7 @@ def evap_set_energy_balance_table(evap) -> pd.DataFrame:
             "Steam (lb/hr)": f"{e.calandria_side.flow_lb_per_hr:,.2f}",
             "h_fg (BTU/lb)": f"{e.calandria_side.h_fg:,.2f}",
             "Entering (MM BTU/hr)": f"{e.heat_duty_btu_per_hr / 1e6:,.2f}",
+            "Heat Loss (MM BTU/hr)": f"{e.heat_loss_btu_per_hr / 1e6:,.2f}",
             "Sensible (MM BTU/hr)": f"{e.heat_from_flash / 1e6:,.2f}",
             "Net for Evap (MM BTU/hr)": f"{e.heat_available_for_evaporation / 1e6:,.2f}",
             "Evaporated (lb/hr)": f"{e.lbs_evaporated_per_hr:,.2f}",

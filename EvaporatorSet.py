@@ -78,6 +78,22 @@ class EvaporatorSet:
         )
         evap_set.adjust_pressure_profile()
         evap_set.generate_pfd(pre_evap=pre)
+
+    With shell heat loss, calandria gas bleed, and condensate flash recovery::
+
+        evap_set = EvaporatorSet(
+            juice_in=juice,
+            supply_steam=steam,
+            last_effect_pressure_psia=convert_inHg_vacuum_to_psia(26),
+            target_brix_out=60,
+            effect_areas_ft2=[4800, 4800, 4800],
+            incond_gas_bleed_percent=1.0,       # % of each calandria's steam vented to purge incondensables
+            heat_loss_percent=[0.0, 2.5, 2.0],  # per-effect vessel shell loss; effect 1 stays at 0
+            recover_condensate_flash=True,      # let calandria condensate self-flash to the next effect
+            name="Triple — Heat Loss + Gas Bleed + Condensate Flash",
+        )
+        evap_set.adjust_pressure_profile()
+        evap_set.neat_display()
     """
     def __init__(self, juice_in: SugarStream,
                  supply_steam: EvaporatorSteam,
@@ -86,8 +102,9 @@ class EvaporatorSet:
                  effect_areas_ft2=[1000, 1000, 1000],
                  vapor_bleeds=[0, 0],
                  incond_gas_bleed_percent=1.0,
-                 heat_loss_percent=[3.0, 2.5, 2.0], # descends along each effect
+                 heat_loss_percent=[0.0, 2.5, 2.0], # descends along each effect; effect 1 stays at 0, see note in build_effects
                  recover_condensate_flash=False,
+                 condensate_temp_drop=True,
                  dessin_coefficient=18000,
                  liquid_level_ft=2,
                  injection_water_temp_F=90,
@@ -109,6 +126,7 @@ class EvaporatorSet:
         self.incond_gas_bleed_percent = incond_gas_bleed_percent
         self.heat_loss_percent = heat_loss_percent
         self.recover_condensate_flash = recover_condensate_flash
+        self.condensate_temp_drop = condensate_temp_drop
         # 1. Package the shared arguments into a temporary dictionary
         evap_args = {
             "juice_in_lb_per_hr": self.juice_in.flow_lb_per_hr,
@@ -123,6 +141,24 @@ class EvaporatorSet:
         self.supply_steam.flow_lb_per_hr = self.steam_initial_guess
         self.build_effects()
     
+    def _heat_loss_for_effect(self, i):
+        """Vessel heat-loss % for effect i. Effect 1 defaults to 0 -- its calandria runs on fresh
+        exhaust and is assumed well insulated, so losses are only counted from effect 2 onward
+        (Hugot's convention). The list is padded with its last value if it's shorter than the set."""
+        losses = self.heat_loss_percent
+        if not losses:
+            return 0.0
+        return losses[i] if i < len(losses) else losses[-1]
+
+    def _vapor_to_next_effect(self, i):
+        """Vapor feeding effect i+1's calandria: effect i's evaporated vapor net of its own bleed,
+        plus any calandria-condensate flash vapor recovered from effect i (if enabled)."""
+        eff = self.evaporator_list[i]
+        vapor = eff.lbs_evaporated_per_hr - eff.vapor_bleed.flow_lb_per_hr
+        if self.recover_condensate_flash:
+            vapor += eff.condensate_flash_vapor_lb_per_hr
+        return vapor
+
     def build_effects(self):
         """Builds the evaporator effects objects and stores them in a list"""
         # print(f"Steam initial guess: {self.steam_initial_guess:,.1f} lb/hr")
@@ -135,14 +171,19 @@ class EvaporatorSet:
             liquid_level_ft=self.liquid_level_ft,
             dessin_coefficient=self.dessin_coefficient,
             vapor_pressure_psia=self.pressure_profile_initial[1], # first list item is calandria, so second item [1] is first effect vapor pressure
-            vapor_bleed=self.vapor_bleeds[0]
+            vapor_bleed=self.vapor_bleeds[0],
+            heat_loss_percent=self._heat_loss_for_effect(0),
+            calandria_bleed_pec=self.incond_gas_bleed_percent,
+            condensate_temp_drop=self.condensate_temp_drop,
+            cond_flash_to_next=self.recover_condensate_flash and self.number_of_effects > 1,
         )]
 
         self.evaporator_list[0].solve()
 
         for i in range(self.number_of_effects - 1):
-            steam_to_next = self.evaporator_list[i].lbs_evaporated_per_hr - self.evaporator_list[i].vapor_bleed.flow_lb_per_hr
+            steam_to_next = self._vapor_to_next_effect(i)
             bled_vapor = self.vapor_bleeds[i+1] if i+1 < len(self.vapor_bleeds) else 0 # safety check if out of range
+            is_last_effect = (i + 1) == self.number_of_effects - 1
             evaporator = Evaporator(
                 juice_side_in=self.evaporator_list[i].juice_side_out,
                 calandria_side=EvaporatorSteam(P_psia=self.pressure_profile_initial[i + 1],flow_lb_per_hr=steam_to_next), # recall, pressure profile list starts with supply steam
@@ -150,10 +191,14 @@ class EvaporatorSet:
                 liquid_level_ft=self.liquid_level_ft,
                 dessin_coefficient=self.dessin_coefficient,
                 vapor_pressure_psia=self.pressure_profile_initial[i + 2], # remember, first list item is supply steam, so 2 list items down would be second eff vap press, so on and so forth
-                vapor_bleed=bled_vapor
+                vapor_bleed=bled_vapor,
+                heat_loss_percent=self._heat_loss_for_effect(i + 1),
+                calandria_bleed_pec=self.incond_gas_bleed_percent,
+                condensate_temp_drop=self.condensate_temp_drop,
+                cond_flash_to_next=self.recover_condensate_flash and not is_last_effect,
             )
-        # note on the logic, okay look, if the number of effects is 3, then the list length of the pressure profile will be 4. 
-        # so the loop number in this case would be 3 - 1 = 2. 
+        # note on the logic, okay look, if the number of effects is 3, then the list length of the pressure profile will be 4.
+        # so the loop number in this case would be 3 - 1 = 2.
         # So that way, the calandria side on building evap effect 2 in the first loop (list item [1]) gets the second list item for juice_side_in
         # And the vapor_pressure_psia gets the third list item
         # the final loop logic will not be out of range because on the last loop (which means i=1, second loop because first i=0) i + 2 = 3,
@@ -166,28 +211,8 @@ class EvaporatorSet:
         self.supply_steam.flow_lb_per_hr = new_steam_flow_lb_per_hr
         self.evaporator_list[0].calandria_side.flow_lb_per_hr = self.supply_steam.flow_lb_per_hr
         for i in range(self.number_of_effects - 1):
-            vapor_to_next = self.evaporator_list[i].lbs_evaporated_per_hr - self.evaporator_list[i].vapor_bleed.flow_lb_per_hr
-            self.evaporator_list[i+1].calandria_side.flow_lb_per_hr = vapor_to_next
+            self.evaporator_list[i+1].calandria_side.flow_lb_per_hr = self._vapor_to_next_effect(i)
         self.update_set()
-        # thoughts, I think to implement the new changes for heat loss and gas bleeds
-        # I think maybe the calandria side steam flow will be supply steam - supply steam * percent bled
-        # do that for each one
-        # The heat loss will only be taken for the vapor space
-        # so it is assumed the calandria is well insulated and negligible heat loss
-        # comes from the calandria
-        # this means we only need to account for heat losses after the first effect
-        # so after effect one, we will say Q available = L (steam in - bleed) * (1 - loss%/100)
-        # So with this in mind, we will ignore this for the vapors going to condensors
-        # becuase this only slightly changes the water needed for the condensor
-        # this is also how Hugot explains heat losses
-        # also note that losses decrease along the set because they get colder
-        # now condensate flash will be done like this
-        # T cond = T_cal - 0.4 * (T_cal - T_juice) : a formula from https://www.sugarprocesstech.com/flash-vapour-calculation/
-        # this would need to be implemented in the Evaporator Object itself
-        # program in a condensate temp drop True or False
-        # actually, I think everything should be implemented on the Evaporator class level
-        # just note that the heat loss list must start with a 0, becuase 
-        # this only affects the effect after the first effect
         # Joke: what effect would effect 1 have on effect 2 while effectively bleeding effect 1 gases?
         # Answer: effectively just a little bit
 
@@ -309,17 +334,25 @@ class EvaporatorSet:
     
     @property
     def clean_condensate(self):
-        """Post-flash condensate from the first effect (fresh exhaust) (lb/hr)."""
+        """Post-flash condensate from the first effect (fresh exhaust) (lb/hr).
+        Nets out incondensable-gas bleed and, if recover_condensate_flash is on, whatever already
+        self-flashed off to the next effect's calandria before hitting atmospheric letdown."""
         eff = self.evaporator_list[0]
-        return flash_condensate(eff.calandria_side.flow_lb_per_hr, eff.calandria_side.sat_temp_deg_F)
+        return flash_condensate(eff.condensate_liquid_after_flash_lb_per_hr, eff.condensate_liquid_temp_after_flash_deg_F)
 
     @property
     def dirty_condensate(self):
         """Sum of post-flash condensate from effect 2 to the last effect (inter-effect vapor) (lb/hr)."""
         return sum(
-            flash_condensate(eff.calandria_side.flow_lb_per_hr, eff.calandria_side.sat_temp_deg_F)
+            flash_condensate(eff.condensate_liquid_after_flash_lb_per_hr, eff.condensate_liquid_temp_after_flash_deg_F)
             for eff in self.evaporator_list[1:]
         )
+
+    @property
+    def total_condensate_flash_recovered(self):
+        """Total vapor recovered across the set by letting calandria condensate self-flash down to
+        the next effect's calandria pressure (lb/hr). Zero unless recover_condensate_flash is on."""
+        return sum(eff.condensate_flash_vapor_lb_per_hr for eff in self.evaporator_list)
 
     def generate_pfd(self, show: bool = True, save_path: str = None, pre_evap=None):
         """Render the process flow diagram. Pass a solved PreEvaporator to include it on the same figure."""
@@ -427,7 +460,9 @@ class EvaporatorSet:
         for i, e in enumerate(ef):
             steam_flow  = e.calandria_side.flow_lb_per_hr
             h_fg_steam  = e.calandria_side.h_fg
+            condensing  = e.condensing_steam_lb_per_hr
             entering    = e.heat_duty_btu_per_hr / 1e6
+            heat_loss   = e.heat_loss_btu_per_hr / 1e6
 
             juice_flow  = e.juice_side_in.flow_lb_per_hr
             cp          = e.juice_side_in.cp_btu_per_lb_deg_F
@@ -440,24 +475,35 @@ class EvaporatorSet:
             evap        = e.lbs_evaporated_per_hr
 
             print(f"\n  Effect {i + 1}")
-            print(f"  {'Entering  ':<12}"
+            print(f"  {'Condensing':<12}"
                   f"  {steam_flow:>10,.0f} lb/hr"
+                  f" * (1 - {e.calandria_bleed_pec:.2f}% gas bleed)"
+                  f"  =  {condensing:>10,.0f} lb/hr")
+            print(f"  {'Entering  ':<12}"
+                  f"  {condensing:>10,.0f} lb/hr"
                   f" * {h_fg_steam:>7.1f} BTU/lb"
                   f" / 10^6"
                   f"  =  {entering:>8.3f} MM BTU/hr")
+            print(f"  {'Heat Loss ':<12}"
+                  f"  {entering:>10.3f} MM BTU/hr"
+                  f" * {e.heat_loss_percent:>5.2f}% shell loss"
+                  f"  =  {heat_loss:>8.3f} MM BTU/hr")
             print(f"  {'Sensible  ':<12}"
                   f"  {juice_flow:>10,.0f} lb/hr"
                   f" * {cp:>5.3f} cp"
                   f" * ({T_in:.1f} - {T_out:.1f}) degF"
                   f" / 10^6"
                   f"  =  {sensible:>8.3f} MM BTU/hr")
-            
+
             print(f"  Net for Evaporation  -->  "
-                  f"{entering:.3f} + ({sensible:.3f})"
+                  f"{entering:.3f} - ({heat_loss:.3f}) + ({sensible:.3f})"
                   f"  =  {net:.3f} MM BTU/hr")
             print(f"  Evaporated  =  {net:.3f} MM BTU/hr * 10^6"
                   f" / {h_fg_vap:.1f} BTU/lb"
                   f"  =  {evap:,.0f} lb/hr")
+            if self.recover_condensate_flash and e.cond_flash_to_next:
+                print(f"  Condensate flash to next effect: {e.condensate_out:,.0f} lb/hr @ {e.condensate_temperature:.1f}°F"
+                      f"  ->  {e.condensate_flash_vapor_lb_per_hr:,.0f} lb/hr vapor recovered")
             print(f"  {'-' * (W - 2)}")
         print(f"\n{light}\n")
 
@@ -486,6 +532,8 @@ class EvaporatorSet:
         print(f"  Clean condensate (Effect 1, fresh exhaust) : {self.clean_condensate:>12,.0f} lb/hr")
         print(f"  Dirty condensate (Effect 2+, inter-effect) : {self.dirty_condensate:>12,.0f} lb/hr")
         print(f"  Total condensate                           : {self.clean_condensate + self.dirty_condensate:>12,.0f} lb/hr")
+        if self.recover_condensate_flash:
+            print(f"  Flash vapor recovered to next effect       : {self.total_condensate_flash_recovered:>12,.0f} lb/hr")
         print(f"{light}\n")
 
     def to_excel(self, workbook, sheet_writer=None):
@@ -554,6 +602,8 @@ class EvaporatorSet:
             ("Calandria temp (°F)",  *[e.calandria_side.sat_temp_deg_F       for e in ef]),
             ("Calandria h_fg (BTU/lb)", *[e.calandria_side.h_fg              for e in ef]),
             ("Duty (MM BTU/hr)",     *[e.heat_duty_btu_per_hr / 1e6          for e in ef]),
+            ("Gas bleed (%)",        *[e.calandria_bleed_pec                 for e in ef]),
+            ("Heat loss (%)",        *[e.heat_loss_percent                   for e in ef]),
             ("U calc (BTU/hr·ft²·°F)",  *[e.heat_xfer_U                      for e in ef]),
             ("U Dessin (BTU/hr·ft²·°F)", *[e.dessin_U                        for e in ef]),
         ], fmts=["@"] + ["#,##0.00"] * n)
@@ -561,18 +611,19 @@ class EvaporatorSet:
         sw.section(f"{self.name} — ENERGY BALANCE PER EFFECT")
         sw.table(
             ["Effect", "Steam (lb/hr)", "h_fg (BTU/lb)", "Entering (MM BTU/hr)",
-             "Sensible (MM BTU/hr)", "Net for Evap (MM BTU/hr)", "Evaporated (lb/hr)"],
+             "Heat Loss (MM BTU/hr)", "Sensible (MM BTU/hr)", "Net for Evap (MM BTU/hr)", "Evaporated (lb/hr)"],
             [
                 (f"Effect {i + 1}",
                  e.calandria_side.flow_lb_per_hr,
                  e.calandria_side.h_fg,
                  e.heat_duty_btu_per_hr / 1e6,
+                 e.heat_loss_btu_per_hr / 1e6,
                  e.heat_from_flash / 1e6,
                  e.heat_available_for_evaporation / 1e6,
                  e.lbs_evaporated_per_hr)
                 for i, e in enumerate(ef)
             ],
-            fmts=["@", "#,##0", "0.0", "0.000", "0.000", "0.000", "#,##0"],
+            fmts=["@", "#,##0", "0.0", "0.000", "0.000", "0.000", "0.000", "#,##0"],
         )
 
         cond = self.condenser
@@ -593,6 +644,8 @@ class EvaporatorSet:
         sw.row("Clean condensate", self.clean_condensate, "lb/hr", fmt="#,##0")
         sw.row("Dirty condensate", self.dirty_condensate, "lb/hr", fmt="#,##0")
         sw.row("Total condensate", self.clean_condensate + self.dirty_condensate, "lb/hr", fmt="#,##0")
+        if self.recover_condensate_flash:
+            sw.row("Flash vapor recovered to next effect", self.total_condensate_flash_recovered, "lb/hr", fmt="#,##0")
 
         if not standalone:
             return sw
@@ -615,14 +668,16 @@ class EvaporatorSet:
             if abs(balance) > balance_tolerance:
                 print(f"warning! Balance Error in effect {i+1}, ")
                 print(f"IN juice {entering_juice:,.2f} - OUT juice {exiting_juice:,.2f} - OUT {vapors:,.2f} = {balance:,.2f} lb/hr")
-            # Steam Side Balance
+            # Steam Side Balance (condensate_out already nets out the incondensable-gas bleed,
+            # so add that vented flow back in to check the calandria closes)
             steam_in = self.evaporator_list[i].calandria_side.flow_lb_per_hr
             condensate_out = self.evaporator_list[i].condensate_out
-            calandria_balance = steam_in - condensate_out
+            gas_bleed_out = steam_in - self.evaporator_list[i].condensing_steam_lb_per_hr
+            calandria_balance = steam_in - condensate_out - gas_bleed_out
             calandria_tolerance = 0.1
             if abs(calandria_balance) > calandria_tolerance:
                 print(f"warning! Balance Error in effect {i}, ")
-                print(f"IN steam {steam_in:,.2f} - OUT condensate {condensate_out:,.2f} = {calandria_balance:,.2f} lb/hr")
+                print(f"IN steam {steam_in:,.2f} - OUT condensate {condensate_out:,.2f} - OUT gas bleed {gas_bleed_out:,.2f} = {calandria_balance:,.2f} lb/hr")
             else:
                 print(f"Material Balance OK in effect {i+1}")
 
@@ -643,21 +698,21 @@ class EvaporatorSet:
             Q_dot_latent = self.evaporator_list[i].vapor_out.flow_lb_per_hr * latent_heat
             juice_energy_rise = Q_dot_sens + Q_dot_latent
 
-            # from supply steam
-            steam_in = self.evaporator_list[i].calandria_side.flow_lb_per_hr
-            steam_latent_heat = self.evaporator_list[i].calandria_side.h_fg
-            steam_energy_drop = steam_in * steam_latent_heat
+            # from supply steam, net of the incondensable-gas bleed and vessel heat loss --
+            # that's the energy actually delivered to the juice side
+            eff = self.evaporator_list[i]
+            steam_energy_drop = eff.heat_duty_btu_per_hr - eff.heat_loss_btu_per_hr
 
             # balance them
             energy_balance = juice_energy_rise - steam_energy_drop
 
             # check balance
             energy_tolerance = 100 # its a big number, so big tolerance
-            
+
             if abs(energy_balance) > energy_tolerance:
                 print(f"warning! Energy Balance Error in effect {i+1}, ")
                 print(f"Juice: sensible heat: {Q_dot_sens:,.2f} + Latent heat: {Q_dot_latent:,.2f} = {juice_energy_rise:,.2f} BTU/hr")
-                print(f"Steam: latent heat: {steam_in:,.2f} * {steam_latent_heat:,.2f} = {steam_energy_drop:,.2f} BTU/hr")
+                print(f"Steam (net of gas bleed + heat loss): {steam_energy_drop:,.2f} BTU/hr")
                 print(f"Balance: {energy_balance:,.2f} BTU/hr")
             else:
                 print(f"Energy Balance OK in effect {i+1}")

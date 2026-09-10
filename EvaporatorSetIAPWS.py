@@ -136,6 +136,14 @@ class EvaporatorIAPWS(Evaporator):
         self.vapor_out   = SteamStreamAdapter(P_psia=vapor_pressure_psia, flow_lb_per_hr=0)
         self.vapor_bleed = SteamStreamAdapter(P_psia=vapor_pressure_psia, flow_lb_per_hr=vapor_bleed)
 
+        # Evaporator.__init__ is bypassed above, so set these explicitly: heat_duty_btu_per_hr
+        # (inherited unchanged) depends on them. This variant doesn't model heat loss, gas bleed,
+        # or condensate flash recovery -- it's off by default here.
+        self.condensate_temp_drop = False
+        self.heat_loss_percent    = 0
+        self.calandria_bleed_pec  = 0
+        self.cond_flash_to_next   = False
+
     @property
     def lbs_evaporated_per_hr(self):
         """Same formula as parent; uses vapor_out.h_fg (IAPWS) for vapor latent heat."""

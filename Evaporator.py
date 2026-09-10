@@ -2,6 +2,7 @@
 from SugarStream import SugarStream
 from SteamStream import EvaporatorSteam, SteamStream
 from evaporator_functions import calculate_U_dessin, calculate_U_heat_xfer, convert_inHg_vacuum_to_psia, convert_psig_to_psia
+from condensate_utils import flash_condensate
 
 class Evaporator:
     """Class to represent a Robert Evaporator"""
@@ -36,6 +37,9 @@ class Evaporator:
         self.vapor_out = EvaporatorSteam(P_psia=self.vapor_pressure_psia, flow_lb_per_hr=0)
         self.vapor_bleed = EvaporatorSteam(P_psia=self.vapor_pressure_psia, flow_lb_per_hr=vapor_bleed)
         self.condensate_temp_drop = condensate_temp_drop # true or false
+        self.heat_loss_percent = heat_loss_percent # % of calandria heat duty lost from the vessel shell to the room (Hugot-style derating)
+        self.calandria_bleed_pec = calandria_bleed_pec # % of calandria steam vented (unspent) to purge incondensable gases
+        self.cond_flash_to_next = cond_flash_to_next # let the calandria condensate self-flash down to this effect's vapor pressure, recovering flash vapor as extra heating steam for the next effect
 
     def _initial_brix_guess_out(self):
         """Calculate an initial guess for the outlet brix using the heat duty and latent heat"""
@@ -45,22 +49,23 @@ class Evaporator:
         return brix_out_guess
 
     @property
-    def heat_duty_btu_per_hr(self):
-        """Calculate the heat duty in BTU/hr"""
-        Q = self.calandria_side.flow_lb_per_hr * self.calandria_side.h_fg
-        return Q
-    
+    def condensing_steam_lb_per_hr(self):
+        """Calandria steam that actually condenses, net of the incondensable-gas bleed vented off unspent"""
+        return self.calandria_side.flow_lb_per_hr * (1 - self.calandria_bleed_pec / 100)
+
     @property
-    def lbs_evaporated_per_hr(self):
-        """Calculate the pounds of juice evaporated per hour"""
-        juice_side_temp_rise = - self.juice_side_out.temp_deg_F + self.juice_side_in.temp_deg_F # positive if flashing
-        h_fg_juice_vapors = self.juice_side_out.latent_heat_btu_per_lb 
-        cp_juice = self.juice_side_in.cp_btu_per_lb_deg_F
-        heat_from_flash = self.juice_side_in.flow_lb_per_hr * cp_juice * juice_side_temp_rise
-        heat_for_evaporation = self.heat_duty_btu_per_hr + heat_from_flash # deduct if heating juices
-        lbs_evap = heat_for_evaporation / h_fg_juice_vapors
-        return lbs_evap
-    
+    def heat_duty_btu_per_hr(self):
+        """Heat released by the condensing calandria steam, net of the incondensable-gas bleed --
+        this is the heat that actually crosses the tube surface, i.e. the Q behind Q=U*A*dT"""
+        return self.condensing_steam_lb_per_hr * self.calandria_side.h_fg
+
+    @property
+    def heat_loss_btu_per_hr(self):
+        """Heat lost from the vapor-space shell to the room after crossing the tube surface -- it
+        never reaches the juice, so it doesn't heat/evaporate it, but it also doesn't lower the
+        heat_xfer_U calc (that heat did cross the tubes)."""
+        return self.heat_duty_btu_per_hr * self.heat_loss_percent / 100
+
     @property
     def heat_from_flash(self):
         """Calculate the heat from flash"""
@@ -71,17 +76,24 @@ class Evaporator:
 
     @property
     def condensate_temperature(self):
+        """Calandria condensate temperature, optionally subcooled below the steam saturation temp as
+        it self-flashes toward the juice-side temp (formula from https://www.sugarprocesstech.com/flash-vapour-calculation/)"""
+        if not self.condensate_temp_drop:
+            return self.calandria_side.sat_temp_deg_F
         T_stm = self.calandria_side.sat_temp_deg_F
         T_j = self.juice_side_out.temp_deg_F
-        temp_drop = T_stm - 0.4 * (T_stm - T_j)
-        cond_temp = T_stm - temp_drop
-        return cond_temp if self.condensate_temp_drop == True else T_stm
-        
+        return T_stm - 0.4 * (T_stm - T_j)
+
     @property
     def heat_available_for_evaporation(self):
-        """Calculate the heat available for evaporation"""
-        heat_available_for_evaporation = self.heat_duty_btu_per_hr + self.heat_from_flash
-        return heat_available_for_evaporation
+        """Heat left to boil off juice water: tube duty, less vessel heat loss, plus/minus juice-side flash"""
+        return self.heat_duty_btu_per_hr - self.heat_loss_btu_per_hr + self.heat_from_flash
+
+    @property
+    def lbs_evaporated_per_hr(self):
+        """Calculate the pounds of juice evaporated per hour"""
+        h_fg_juice_vapors = self.juice_side_out.latent_heat_btu_per_lb
+        return self.heat_available_for_evaporation / h_fg_juice_vapors
 
     @property
     def brix_out(self):
@@ -132,8 +144,38 @@ class Evaporator:
     
     @property
     def condensate_out(self):
-        return self.calandria_side.flow_lb_per_hr
-    
+        """Liquid condensate leaving the calandria, net of the incondensable-gas bleed"""
+        return self.condensing_steam_lb_per_hr
+
+    @property
+    def condensate_flash_target_temp_deg_F(self):
+        """Saturation temp of this effect's vapor space, i.e. the next effect's calandria temp"""
+        return self.vapor_temperature
+
+    @property
+    def condensate_flash_vapor_lb_per_hr(self):
+        """Vapor recovered when the calandria condensate self-flashes letting down to the next
+        effect's (lower) calandria pressure. Zero unless cond_flash_to_next is enabled -- there is
+        nothing to flash into on the last effect, which has no "next" calandria to feed."""
+        if not self.cond_flash_to_next:
+            return 0.0
+        liquid_remaining = flash_condensate(
+            self.condensate_out, self.condensate_temperature,
+            flash_temp_F=self.condensate_flash_target_temp_deg_F,
+            h_fg_flash_btu_lb=self.vapor_out.h_fg,
+        )
+        return self.condensate_out - liquid_remaining
+
+    @property
+    def condensate_liquid_after_flash_lb_per_hr(self):
+        """Condensate liquid remaining after any flash vapor recovered to the next effect"""
+        return self.condensate_out - self.condensate_flash_vapor_lb_per_hr
+
+    @property
+    def condensate_liquid_temp_after_flash_deg_F(self):
+        """Temperature of the condensate liquid handed off to the condensate return system"""
+        return self.condensate_flash_target_temp_deg_F if self.cond_flash_to_next else self.condensate_temperature
+
     def _update_juice_side_out(self, lbs_evap):
         """Update the juice_side_out properties based on the current calculations"""
         flow_out = self.juice_side_in.flow_lb_per_hr - lbs_evap
@@ -181,9 +223,14 @@ class Evaporator:
         print("\n Steam Out details: \n")
         self.vapor_out.display_properties()
         print("\n Material and Energy Balance\n")
-        print(f"Entering: {self.calandria_side.flow_lb_per_hr:,.2f} lb/hr * {self.calandria_side.h_fg:,.2f} BTU/lb = {self.heat_duty_btu_per_hr:,.2f} BTU/hr")
+        print(f"Condensing: {self.calandria_side.flow_lb_per_hr:,.2f} lb/hr steam * (1 - {self.calandria_bleed_pec:.2f}% gas bleed) = {self.condensing_steam_lb_per_hr:,.2f} lb/hr")
+        print(f"Entering: {self.condensing_steam_lb_per_hr:,.2f} lb/hr * {self.calandria_side.h_fg:,.2f} BTU/lb = {self.heat_duty_btu_per_hr:,.2f} BTU/hr")
+        print(f"Less: {self.heat_duty_btu_per_hr:,.2f} BTU/hr * {self.heat_loss_percent:.2f}% shell heat loss = {self.heat_loss_btu_per_hr:,.2f} BTU/hr")
         print(f"Plus: {self.juice_side_in.flow_lb_per_hr:,.2f} lb/hr * {self.juice_side_in.cp_btu_per_lb_deg_F:,.2f} BTU/lb * ({self.juice_side_in.temp_deg_F - self.juice_side_out.temp_deg_F:,.2f}°F) = {self.heat_from_flash:,.2f} BTU/hr")
-        print(f"Available for Evaporation: {self.heat_duty_btu_per_hr:,.2f} + {self.heat_from_flash:,.2f} = {self.heat_available_for_evaporation:,.2f} BTU/hr")
+        print(f"Available for Evaporation: {self.heat_duty_btu_per_hr:,.2f} - {self.heat_loss_btu_per_hr:,.2f} + {self.heat_from_flash:,.2f} = {self.heat_available_for_evaporation:,.2f} BTU/hr")
+        if self.cond_flash_to_next:
+            print(f"Condensate flash to next effect: {self.condensate_out:,.2f} lb/hr @ {self.condensate_temperature:,.2f}°F -> "
+                  f"{self.condensate_flash_vapor_lb_per_hr:,.2f} lb/hr vapor recovered + {self.condensate_liquid_after_flash_lb_per_hr:,.2f} lb/hr liquid @ {self.condensate_flash_target_temp_deg_F:,.2f}°F")
 
 # Test below, unwrap to see outputs
 if __name__ == "__main__":
