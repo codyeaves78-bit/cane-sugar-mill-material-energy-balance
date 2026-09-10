@@ -1,0 +1,27 @@
+name: Keep Streamlit App Awake
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'   # every 6 hours
+  workflow_dispatch:         # lets you trigger manually too
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping app with browser
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npx playwright install --with-deps chromium
+      - run: |
+          node -e "
+          const { chromium } = require('playwright');
+          (async () => {
+            const browser = await chromium.launch();
+            const page = await browser.newPage();
+            await page.goto('https://cane-sugar-mill-material-energy-balance-fbl69dwu8opxateg3jsgnn.streamlit.app/', { waitUntil: 'networkidle' });
+            await page.waitForTimeout(5000);
+            await browser.close();
+          })();
+          "
