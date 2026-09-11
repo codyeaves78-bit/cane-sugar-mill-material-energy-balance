@@ -245,23 +245,24 @@ def plot_set_diagram(
             lbl(bx - 0.18, (Y_TOP + Y_BLEED) / 2 + 0.08,
                 f'Bleed\n{bleed:,.0f} lb/hr', ha='right', fs=7.5, color=BC)
 
-        # Incondensable gas bleed — vents from the calandria (steam side), drawn as a
-        # short exit from top-RIGHT of body-centre, mirroring the process-vapor bleed
-        # (top-LEFT) but shorter so it stays clear of the rightward routing segment.
+        # Incondensable gas bleed — vents right off the calandria, from the SAME point
+        # the heating steam/vapor enters (left edge of the body at Y_MID), straight up
+        # and centred so it doesn't grow sideways into the gap between bodies.
         gas_bleed_flow = evap.calandria_side.flow_lb_per_hr - evap.condensing_steam_lb_per_hr
         if gas_bleed_flow > 0.5:
-            gx = cx + BOX_W * 0.20
-            gy = Y_TOP + 0.95
-            arr(gx, Y_TOP, gx, gy, color=GBC, lw=1.5, ls='dashed')
-            lbl(gx + 0.18, gy,
+            gx = cx - BOX_W / 2
+            gy = Y_MID + 0.85
+            arr(gx, Y_MID, gx, gy, color=GBC, lw=1.5, ls='dashed')
+            lbl(gx, gy + 0.10,
                 f'Gas Bleed\n{evap.calandria_bleed_pec:.1f}% | {gas_bleed_flow:,.0f} lb/hr',
-                ha='left', va='bottom', fs=7, color=GBC)
+                ha='center', va='bottom', fs=7, color=GBC)
 
         # Vessel shell heat loss — not a process stream, so drawn as a short outward
-        # arrow from the RIGHT side of the body rather than a piped exit.
+        # arrow from the RIGHT side of the body, well above the gas bleed band so the
+        # two labels never crowd the same corner of the inter-body gap.
         if evap.heat_loss_percent > 0.001:
-            hx0, hy0 = cx + BOX_W / 2, Y_MID + 1.55
-            hx1, hy1 = hx0 + 0.55, hy0 + 0.45
+            hx0, hy0 = cx + BOX_W / 2, Y_MID + 1.75
+            hx1, hy1 = hx0 + 0.45, hy0 + 0.4
             arr(hx0, hy0, hx1, hy1, color=HLC, lw=1.5, ls='dashed')
             lbl(hx1 + 0.10, hy1,
                 f'Heat Loss\n{evap.heat_loss_percent:.1f}% | {evap.heat_loss_btu_per_hr:,.0f} BTU/hr',
