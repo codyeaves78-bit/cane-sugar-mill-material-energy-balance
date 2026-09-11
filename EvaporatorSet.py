@@ -101,8 +101,8 @@ class EvaporatorSet:
                  target_brix_out=65,
                  effect_areas_ft2=[1000, 1000, 1000],
                  vapor_bleeds=[0, 0],
-                 incond_gas_bleed_percent=1.0,
-                 heat_loss_percent=[0.0, 2.5, 2.0], # descends along each effect; effect 1 stays at 0, see note in build_effects
+                 incond_gas_bleed_percent=0.0,
+                 heat_loss_percent=[0.0, 0.0, 0.0], # descends along each effect; effect 1 stays at 0, see note in build_effects
                  recover_condensate_flash=False,
                  condensate_temp_drop=True,
                  dessin_coefficient=18000,

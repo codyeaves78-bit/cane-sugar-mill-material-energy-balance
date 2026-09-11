@@ -15,8 +15,8 @@ class Evaporator:
                  vapor_pressure_psia=14.7,
                  vapor_bleed=0,
                  condensate_temp_drop=False,
-                 heat_loss_percent=3.0,
-                 calandria_bleed_pec=1.0,
+                 heat_loss_percent=0.0,
+                 calandria_bleed_pec=0.0,
                  cond_flash_to_next=False):
         self.juice_side_in = juice_side_in
         self.calandria_side = calandria_side
