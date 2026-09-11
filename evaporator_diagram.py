@@ -59,7 +59,8 @@ def plot_set_diagram(
     Y_BOT   = 2.70        # BOT  edge of body = juice connection (lowered for label room)
     Y_MID   = (Y_TOP + Y_BOT) / 2   # MID height = steam/vapor inlet
     Y_COND  = 1.45
-    Y_FOOT  = 0.40
+    Y_FLASH = 0.55        # condensate flash-recovery routing level, below the condensate labels
+    Y_FOOT  = -0.15
 
     centers = [L_PAD + PRE_SHIFT + BOX_W / 2 + i * (BOX_W + BOX_GAP) for i in range(n)]
     x_lft   = 0.12 * L_PAD
@@ -70,13 +71,16 @@ def plot_set_diagram(
     JC = '#154360'
     CC = '#7f8c8d'
     BC = '#1e8449'
+    HLC = '#e67e22'   # heat loss (vessel shell -> room)
+    GBC = '#8e44ad'   # incondensable gas bleed (calandria vent)
+    FVC = '#16a085'   # condensate flash vapor recovered to next effect
     BOX_EC = '#2471a3'
     BOX_FC = '#d6eaf8'
 
     fig_w_in = max(10.0, DW * 0.72)
     fig, ax  = plt.subplots(figsize=(fig_w_in, 9.5))
     ax.set_xlim(0, DW)
-    ax.set_ylim(0.2, DH)
+    ax.set_ylim(-0.5, DH)
     ax.axis('off')
     fig.patch.set_facecolor('#f8f9fa')
 
@@ -240,6 +244,43 @@ def plot_set_diagram(
             arr(bx, Y_TOP, bx, Y_BLEED, color=BC, lw=1.5)
             lbl(bx - 0.18, (Y_TOP + Y_BLEED) / 2 + 0.08,
                 f'Bleed\n{bleed:,.0f} lb/hr', ha='right', fs=7.5, color=BC)
+
+        # Incondensable gas bleed — vents from the calandria (steam side), drawn as a
+        # short exit from top-RIGHT of body-centre, mirroring the process-vapor bleed
+        # (top-LEFT) but shorter so it stays clear of the rightward routing segment.
+        gas_bleed_flow = evap.calandria_side.flow_lb_per_hr - evap.condensing_steam_lb_per_hr
+        if gas_bleed_flow > 0.5:
+            gx = cx + BOX_W * 0.20
+            gy = Y_TOP + 0.95
+            arr(gx, Y_TOP, gx, gy, color=GBC, lw=1.5, ls='dashed')
+            lbl(gx + 0.18, gy,
+                f'Gas Bleed\n{evap.calandria_bleed_pec:.1f}% | {gas_bleed_flow:,.0f} lb/hr',
+                ha='left', va='bottom', fs=7, color=GBC)
+
+        # Vessel shell heat loss — not a process stream, so drawn as a short outward
+        # arrow from the RIGHT side of the body rather than a piped exit.
+        if evap.heat_loss_percent > 0.001:
+            hx0, hy0 = cx + BOX_W / 2, Y_MID + 1.55
+            hx1, hy1 = hx0 + 0.55, hy0 + 0.45
+            arr(hx0, hy0, hx1, hy1, color=HLC, lw=1.5, ls='dashed')
+            lbl(hx1 + 0.10, hy1,
+                f'Heat Loss\n{evap.heat_loss_percent:.1f}% | {evap.heat_loss_btu_per_hr:,.0f} BTU/hr',
+                ha='left', fs=7, color=HLC)
+
+        # Condensate flash recovery — calandria condensate self-flashes down to the
+        # next effect's pressure; the recovered vapor feeds that calandria as extra
+        # heating steam. Routed BELOW the juice line (clear of it) then up into the
+        # gap just short of the next body's steam inlet.
+        if i < n - 1:
+            flash = evap.condensate_flash_vapor_lb_per_hr
+            if evap.cond_flash_to_next and flash > 0.5:
+                x_next_lft = centers[i + 1] - BOX_W / 2
+                fx         = x_next_lft - 0.25
+                seg(cx, Y_COND - 0.55, cx, Y_FLASH, color=FVC, lw=1.4, ls='dashed')
+                seg(cx, Y_FLASH, fx, Y_FLASH, color=FVC, lw=1.4, ls='dashed')
+                arr(fx, Y_FLASH, fx, Y_MID - 0.55, color=FVC, lw=1.4, ls='dashed')
+                lbl((cx + fx) / 2, Y_FLASH - 0.25,
+                    f'Flash → Next Calandria\n{flash:,.0f} lb/hr', fs=7, color=FVC)
 
     # ── Juice stream at Y_BOT ─────────────────────────────────────────────
     if pre_evap:
