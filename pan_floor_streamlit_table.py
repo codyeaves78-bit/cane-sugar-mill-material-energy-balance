@@ -6,11 +6,12 @@
 import pandas as pd
 
 from SugarStream import SugarStream
+from Massecuite import predict_mother_liquor_purity
 
 COLUMNS = [
     "Section", "Stream", "Entering, Leaving, Internal", "Flow lb/hr", "Pol %", "Brix %",
     "Purity", "Pol lb/hr", "Brix lb/hr", "Cu Ft./hr", "Specific Gravity", "Temperature",
-    "Crystal Content (Massecuite Only)",
+    "Crystal Content (Massecuite Only)", "Predicted ML Purity (Birkett, Massecuite Only)",
 ]
 
 STEAM_TYPE_LABELS = {0: "Exhaust", 1: "V1", 2: "V2", 3: "V3", 4: "V4"}
@@ -45,6 +46,7 @@ def stream_row(section, name, tag, s):
         "Purity": s.purity, "Pol lb/hr": s.pol_flow, "Brix lb/hr": s.solids_flow,
         "Cu Ft./hr": s.cu_ft_hr, "Specific Gravity": s.specific_gravity,
         "Temperature": s.temp_deg_F, "Crystal Content (Massecuite Only)": None,
+        "Predicted ML Purity (Birkett, Massecuite Only)": None,
         "Entering, Leaving, Internal": tag,
     }
 
@@ -54,9 +56,10 @@ def water_row(section, name, tag, flow_lb_hr, temp_deg_F=None):
         "Section": section, "Stream": name,
         "Flow lb/hr": flow_lb_hr, "Pol %": None, "Brix %": 0.0,
         "Purity": None, "Pol lb/hr": 0.0, "Brix lb/hr": 0.0,
-        "Cu Ft./hr": flow_lb_hr / 62.4 if flow_lb_hr else 0.0, 
+        "Cu Ft./hr": flow_lb_hr / 62.4 if flow_lb_hr else 0.0,
         "Specific Gravity": 1.0,
         "Temperature": temp_deg_F, "Crystal Content (Massecuite Only)": None,
+        "Predicted ML Purity (Birkett, Massecuite Only)": None,
         "Entering, Leaving, Internal": tag,
     }
 
@@ -65,9 +68,10 @@ def vapor_row(section, name, tag, flow_lb_hr, temp_deg_F=None):
         "Section": section, "Stream": name,
         "Flow lb/hr": flow_lb_hr, "Pol %": None, "Brix %": 0.0,
         "Purity": None, "Pol lb/hr": 0.0, "Brix lb/hr": 0.0,
-        "Cu Ft./hr": None, 
+        "Cu Ft./hr": None,
         "Specific Gravity": None,
         "Temperature": temp_deg_F, "Crystal Content (Massecuite Only)": None,
+        "Predicted ML Purity (Birkett, Massecuite Only)": None,
         "Entering, Leaving, Internal": tag,
     }
 
@@ -86,6 +90,7 @@ def massecuite_row(section, name, tag, masse, flow_lb_hr):
         "Cu Ft./hr": flow_lb_hr / masse.density, "Specific Gravity": masse.density / 62.4,
         "Temperature": masse.massecuite_temp,
         "Crystal Content (Massecuite Only)": masse.crystal_content,
+        "Predicted ML Purity (Birkett, Massecuite Only)": predict_mother_liquor_purity(masse.masse_purity),
         "Entering, Leaving, Internal": tag,
     }
 

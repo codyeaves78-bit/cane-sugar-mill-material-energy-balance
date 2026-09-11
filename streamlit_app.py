@@ -989,6 +989,7 @@ def render_tab_pan():
                     "Flow lb/hr", "Pol %", "Brix %", "Purity", "Pol lb/hr", "Brix lb/hr",
                     "Cu Ft./hr", "Specific Gravity", "Temperature",
                     "Crystal Content (Massecuite Only)",
+                    "Predicted ML Purity (Birkett, Massecuite Only)",
                 ]
             },
             use_container_width=True, hide_index=True, height="content",
