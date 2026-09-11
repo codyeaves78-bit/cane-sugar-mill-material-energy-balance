@@ -7,7 +7,7 @@
 # balance) and all heat transfer results recalculate automatically.
 
 from SteamStream import EvaporatorSteam
-from Massecuite import Massecuite
+from Massecuite import Massecuite, predict_mother_liquor_purity
 from SugarStream import SugarStream
 
 class Pan:
@@ -132,6 +132,13 @@ class Pan:
         return total_pol / total_solids * 100
 
     @property
+    def predicted_ml_purity(self):
+        """Predicted mother liquor purity (%) from masse_purity via Birkett's crystal-yield
+        correlation -- a display-only sanity check against the ml_purity actually supplied,
+        not a substitute for it. See Massecuite.predict_mother_liquor_purity."""
+        return predict_mother_liquor_purity(self.masse_purity)
+
+    @property
     def cp_massecuite(self):
         """Cp used for the sensible heat term (BTU/lb·°F)."""
         return self._cp_sugar(self.masse_brix)
@@ -251,6 +258,7 @@ class Pan:
             'feed_temp_F':                self.feed_temp_F,
             # Massecuite composition
             'ml_purity':                  self.ml_purity,
+            'predicted_ml_purity':        self.predicted_ml_purity,
             'masse_purity':               self.masse_purity,
             'masse_brix':                 self.masse_brix,
             'crystal_content_pct':        self.massecuite.crystal_content,
@@ -325,6 +333,7 @@ class Pan:
         row("Massecuite brix",         self.masse_brix,             "%")
         row("Massecuite purity",       self.masse_purity,           "%")
         row("Mother liquor purity",    self.ml_purity,              "%")
+        row("Predicted ML Purity",     self.predicted_ml_purity,    "%  (Birkett, display only)")
         row("Crystal content",         self.massecuite.crystal_content, "%")
         row("Mother liquor brix",      self.massecuite.mother_liquor_brix, "%")
 

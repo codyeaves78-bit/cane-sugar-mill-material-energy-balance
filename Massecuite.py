@@ -24,6 +24,27 @@ def _build_bpr_regression():
 
 _slope_poly, _b_poly = _build_bpr_regression()
 
+# --- Predicted mother liquor purity from massecuite purity (Birkett correlation) ---
+# Birkett found crystal yield (% on brix) regresses linearly against massecuite purity;
+# mother liquor purity is then back-calculated from that crystal yield via the standard
+# identity CY = (Pm - Pml) / (1 - Pml/100), solved for Pml.
+# DISPLAY AID ONLY: an approximate check against the ml_purity actually supplied to
+# Pan/Massecuite (lab analysis or process knowledge) -- not a substitute for it.
+
+def predict_mother_liquor_purity(masse_purity, use_birkett=True, slope=None, intercept=None):
+    """Predict mother liquor purity (%) from massecuite purity (%).
+
+    use_birkett=True (default) uses Birkett's fitted crystal-yield-vs-massecuite-purity
+    slope/intercept (0.7609, -11.693). Pass use_birkett=False with your own slope/intercept
+    to use a different crystal-yield correlation instead.
+    """
+    if use_birkett:
+        m, b = 0.7609, -11.693
+    else:
+        m, b = float(slope), float(intercept)
+    crystal_yield = m * masse_purity + b
+    return (masse_purity - crystal_yield) / (1 - crystal_yield / 100)
+
 
 class Massecuite:
     """

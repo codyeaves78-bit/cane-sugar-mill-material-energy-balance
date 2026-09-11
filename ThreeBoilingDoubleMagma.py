@@ -572,6 +572,8 @@ class ThreeBoilingDoubleMagma:
             lines.append(_row("  Massecuite Out", pan.massecuite_flow_lb_hr,
                                masse_sol, masse_pol, masse_water,
                                pan.masse_brix, pan.masse_purity, vol_ft3_hr=masse_vol))
+            lines.append(f"  {'Predicted ML Purity (Birkett):':<{LBL}} {pan.predicted_ml_purity:6.1f} %"
+                         f"   (input ml_purity: {pan.ml_purity:.1f} %)")
             lines.append(_row("  Evaporated Water", pan.water_evaporated_lb_hr,
                                0, 0, pan.water_evaporated_lb_hr))
             lines.append(LIGHT)
