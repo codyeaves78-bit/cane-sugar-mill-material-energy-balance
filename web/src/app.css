@@ -124,3 +124,21 @@ tbody tr:nth-child(even) { background: var(--table-band); }
 .placeholder { color: var(--muted); font-style: italic; }
 .error { color: var(--danger); font-size: 13px; }
 .badge-ok { color: var(--ok); font-weight: 600; }
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+.metric {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: var(--bg);
+}
+.metric .metric-label { font-size: 11px; color: var(--muted); }
+.metric .metric-value { font-size: 17px; font-weight: 600; margin-top: 2px; }
+
+.table-wrap { overflow-x: auto; }
+h3.section-title { font-size: 13px; color: var(--accent); margin: 18px 0 8px; }

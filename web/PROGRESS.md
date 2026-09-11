@@ -115,6 +115,10 @@ web/
   src/
     iapws97.js            <- steam property engine (Regions 1,2,4)
     steam_stream.js       <- English-unit wrapper mirroring SteamStream.py
+    sugar_stream.js       <- port of SugarStream.py + sugar_stream_properties.py
+    bagasse.js            <- port of Bagasse.py
+    mill_floor.js         <- port of MillFloor.py
+    clarification.js      <- port of Clarification.py
     app.js                <- tab shell + per-tab UI/calc logic
     app.css               <- styling (light/dark aware)
   dev/                    <- dev-only tooling, not shipped in index.html
@@ -155,12 +159,13 @@ next session doesn't have to rediscover them.
 - [x] **Phase 0 — Steam engine foundation.** `iapws97.js`, `steam_stream.js`,
       validation harness, UI shell + working "Steam Tables" utility tab.
       **DONE 2026-09-10.**
-- [ ] **Phase 1 — Mill Floor + Clarification.** Port `MillFloor.py`,
+- [x] **Phase 1 — Mill Floor + Clarification.** Port `MillFloor.py`,
       `Clarification.py`, `Bagasse.py`, `SugarStream.py`. Build the Mill
       Floor + Clarification tabs (inputs sidebar-equivalent + stream tables +
       balance-check tables, mirroring `streamlit_app.py`'s Mill Floor/
       Clarification tab sections). `MillFloor.mixed_juice_stream` feeds
       `Clarification`; `MillFloor.bagasse_stream` will later feed the Boiler.
+      **DONE 2026-09-11.**
 - [ ] **Phase 2 — Juice Heating, Boiler, Turbines, Deaerator.** Port
       `JuiceHeater.py` / `JuiceHeatingStation.py`, `Boiler.py`, `Turbine.py` /
       `CogenTurbine.py`, `MillTurbines.py` / `CanePrepTurbines.py` /
@@ -214,3 +219,80 @@ next session doesn't have to rediscover them.
   (Mill Floor + Clarification) — read `MillFloor.py` and `Clarification.py`
   closely, port the calculations first (no UI), sanity-check numbers against
   a `python main.py` run with matching inputs, then build the tab UI.
+
+- **2026-09-11** — Phase 1 complete: Mill Floor + Clarification fully ported
+  and wired up. This sandbox turned out to *have* Node.js v22 available
+  (unlike 2026-09-10 — availability apparently varies by sandbox instance,
+  as PROGRESS.md already anticipated), so used `node -e`/`require()` directly
+  against the `.js` source files for cross-checking rather than the
+  headless-browser trick — much less ceremony when Node is present. Still
+  did a final headless-Chromium `--dump-dom` pass (binary was preinstalled
+  at `/opt/pw-browsers/chromium-1194/chrome-linux/chrome` in this container,
+  not the Windows Edge/Chrome paths the 2026-09-10 notes describe — worth
+  checking `/opt/pw-browsers` first in a Linux cloud sandbox before assuming
+  no headless browser is available) to sanity-check the *built* `index.html`
+  end-to-end with real DOM/JS, not just the source modules in isolation.
+  - Ported `SugarStream.py` + `sugar_stream_properties.py` -> `sugar_stream.js`,
+    `Bagasse.py` -> `bagasse.js`, `MillFloor.py` -> `mill_floor.js`,
+    `Clarification.py` -> `clarification.js`. Same property/method names as
+    the Python classes throughout (e.g. `mixed_juice_stream`, `bagasse_stream`,
+    `balance_check`, `_stream_table_rows()`, `_collect_streams()`), per the
+    working agreement, so the JS reads line-for-line against its Python
+    source. These four are plain data/calc classes with no IAPWS97
+    dependency — `SugarStream`'s BPE/latent-heat/sat-temp properties use the
+    same fast polynomial correlations the Python does (deliberately *not*
+    IAPWS97, matching the source's own choice — only valid 1-60 psia, fine
+    for this mill's juice-side pressures).
+  - Cross-checked against live Python (`python3 -c "..."` instantiating
+    `MillFloor`/`Clarification` with matching inputs, dumped every property +
+    `mill_balances` + both `balance_check` dicts + the full `streams` dict as
+    JSON) across 4 cases: the Streamlit sidebar defaults (19000 TPD/6 mills),
+    a second full case with different purities/temps/mill count (17000
+    TPD/4 mills), the `number_of_mills=2` minimum-mills edge case, and the
+    `limed_juice_hot_temp_f <= 212` branch where flash vapor is deliberately
+    zero. All matched to float noise (< 1e-6 relative) on every field,
+    including the per-mill maceration balance list and the full stream
+    table dict — see git history for the exact one-off comparison scripts
+    (not committed, they were `/tmp` scratch).
+  - **Gotcha**: `clarification_diagram.py`'s `_collect_streams()` output
+    order is `TAG_ORDER`, which is *not* the same order the `streams` dict
+    is built in inside `Clarification.__init__` (compare the `raw` list
+    there vs. `TAG_ORDER` — Flash Vapors/Clarified Juice/Filter Cake come
+    right after Filter Wash Water in `TAG_ORDER`, before the "Internal"
+    streams, whereas the dict's own insertion order has all the "In" streams
+    first, then "Out", then "Internal"). Ported `_collect_streams()` as a
+    `Clarification` method using the literal `TAG_ORDER` list transcribed
+    from `clarification_diagram.py` — don't derive this order from the
+    `streams` dict's insertion order, it's wrong.
+  - UI: added `mill_floor.js`/`clarification.js`/`sugar_stream.js`/
+    `bagasse.js` markers to `template.html` + `build.py`; added
+    `buildMillTab()`/`buildClarTab()` to `app.js` following the
+    `buildSteamTab()` pattern (one function per tab, inputs matching the
+    Streamlit sidebar defaults exactly, a Calculate button, metrics + stream
+    table + balance-check table). Introduced a small module-level
+    `PlantState = { mill, clar }` in `app.js` so the Clarification tab can
+    read back the Mill Floor tab's solved `mixed_juice_stream` — Clarification
+    shows an error message telling the user to solve Mill Floor first if it
+    hasn't been solved yet, rather than silently using stale/default data.
+    Both tabs auto-solve once on page load with their default inputs (Mill
+    Floor first, which lets Clarification's own auto-solve succeed
+    immediately too) so the tabs aren't empty on first look. Added a small
+    `.metrics`/`.metric` card CSS block and a generic `renderTable()` helper
+    to `app.js` for the stream/balance tables (reused across both tabs; will
+    likely get reused again by every future phase's tab).
+  - Full plant "Solve Entire Plant" button (the Streamlit sidebar's global
+    solve gate) was *not* ported — each tab solves independently against its
+    own inputs for now, since only two of many future stages exist. Revisit
+    this when more phases land and cross-tab recompute coupling gets
+    unwieldy; for now the simpler per-tab Calculate button (matching the
+    existing Steam Tables tab) was judged good enough and avoids premature
+    plumbing for tabs that don't exist yet.
+  - **Next step for a future session: start Phase 2** (Juice Heating,
+    Boiler, Turbines, Deaerator) — read `JuiceHeater.py`/
+    `JuiceHeatingStation.py`, `Boiler.py`, `Turbine.py`/`CogenTurbine.py`,
+    `MillTurbines.py`/`CanePrepTurbines.py`/`AuxillaryTurbines.py`,
+    `Deaerator.py` closely first. This phase is explicitly called out in the
+    Phase Plan as the "usable MVP" milestone (cane in -> bagasse -> boiler
+    steam -> turbines -> exhaust) — once it's done and validated, that's the
+    point to open a PR to `main` for the user to actually try the app,
+    per the working agreement above.

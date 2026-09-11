@@ -15,6 +15,10 @@ out = (template
        .replace("/*__APP_CSS__*/", read("src/app.css"))
        .replace("/*__IAPWS97_JS__*/", read("src/iapws97.js"))
        .replace("/*__STEAM_STREAM_JS__*/", read("src/steam_stream.js"))
+       .replace("/*__SUGAR_STREAM_JS__*/", read("src/sugar_stream.js"))
+       .replace("/*__BAGASSE_JS__*/", read("src/bagasse.js"))
+       .replace("/*__MILL_FLOOR_JS__*/", read("src/mill_floor.js"))
+       .replace("/*__CLARIFICATION_JS__*/", read("src/clarification.js"))
        .replace("/*__APP_JS__*/", read("src/app.js")))
 
 (WEB / "index.html").write_text(out, encoding="utf-8")

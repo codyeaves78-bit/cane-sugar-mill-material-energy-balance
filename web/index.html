@@ -132,6 +132,24 @@ tbody tr:nth-child(even) { background: var(--table-band); }
 .error { color: var(--danger); font-size: 13px; }
 .badge-ok { color: var(--ok); font-weight: 600; }
 
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+.metric {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: var(--bg);
+}
+.metric .metric-label { font-size: 11px; color: var(--muted); }
+.metric .metric-value { font-size: 17px; font-weight: 600; margin-top: 2px; }
+
+.table-wrap { overflow-x: auto; }
+h3.section-title { font-size: 13px; color: var(--accent); margin: 18px 0 8px; }
+
 </style>
 </head>
 <body>
@@ -706,13 +724,691 @@ tbody tr:nth-child(even) { background: var(--table-band); }
 
 </script>
 <script>
+// Port of SugarStream.py + sugar_stream_properties.py. A generic sugar
+// solution stream (brix/purity/flow/temp/pressure/level) used throughout the
+// mill balance (mixed juice, clarified juice, syrup, massecuite, etc). Fast
+// polynomial correlations are used here (not IAPWS97) for BPE/latent
+// heat/sat-temp, matching the Python source's own choice for speed over the
+// 1-60 psia range these correlations were fitted to.
+
+(function (root) {
+  'use strict';
+
+  function bpeBrix(brix) {
+    return 4.266667 * brix / (100 - brix);
+  }
+
+  function bpeHead(lvl, brix, tVap) {
+    const brixPoly = (
+      0.99991
+      + 0.0038008 * brix
+      + 0.000012662 * brix ** 2
+      + 0.00000009596 * brix ** 3
+    );
+    const tempPoly = (
+      5.314
+      - 0.07135 * tVap
+      + 0.00033908 * tVap ** 2
+      - 0.00000055728 * tVap ** 3
+    );
+    let bpeCalc = lvl * 6 * brixPoly * tempPoly;
+    if (bpeCalc < 1) bpeCalc = 1;
+    return bpeCalc;
+  }
+
+  function satSteamTemp(pPsia) {
+    // Only valid for pressure 1-60 psia.
+    const A = 6.239238;
+    const B = 2988.801361;
+    const C = 377.305590;
+    return B / (A - Math.log10(pPsia)) - C;
+  }
+
+  function bpeTotal(lvl, brix, pVapPsia) {
+    const tVap = satSteamTemp(pVapPsia);
+    return bpeBrix(brix) + bpeHead(lvl, brix, tVap);
+  }
+
+  function getLatentHeat(pPsia) {
+    // Only valid for psia 1-60.
+    const temp = satSteamTemp(pPsia);
+    return -0.00000152231563 * temp ** 3 + 0.000504774867 * temp ** 2 - 0.634291695987 * temp + 1096.29;
+  }
+
+  function getCp(brix) {
+    return 0.9964 - 0.005656 * brix;
+  }
+
+  function specificGravity(brix) {
+    // Specific gravity of a sugar solution, at 68 deg F.
+    return (
+      62.2511
+      + 0.24081 * brix
+      + 0.0007902404 * brix ** 2
+      + 0.00000423954 * brix ** 3
+      - 0.00000001657193 * brix ** 4
+    ) / 62.4;
+  }
+
+  let _count = 0;
+
+  class SugarStream {
+    constructor({ brix = 0, purity = 0, flow_lb_per_hr = 0, temp_deg_F = 90, pressure_psia = 14.7, level_ft = 0 } = {}) {
+      _count += 1;
+      this.stream_id = _count;
+      this.brix = brix;
+      this.purity = purity;
+      this.flow_lb_per_hr = flow_lb_per_hr;
+      this.temp_deg_F = temp_deg_F;
+      this.pressure_psia = pressure_psia;
+      this.level_ft = level_ft;
+    }
+
+    get pol() {
+      return (this.brix > 0 && this.purity > 0) ? this.purity * this.brix / 100 : 0;
+    }
+
+    get boiling_point_elevation_deg_F() {
+      return this.brix > 0 ? bpeTotal(this.level_ft, this.brix, this.pressure_psia) : 0;
+    }
+
+    get cp_btu_per_lb_deg_F() {
+      return this.brix > 0 ? getCp(this.brix) : 1;
+    }
+
+    get specific_gravity() {
+      return this.brix > 0 ? specificGravity(this.brix) : 1;
+    }
+
+    get cu_ft_hr() {
+      return this.flow_lb_per_hr / (62.4 * this.specific_gravity);
+    }
+
+    get latent_heat_btu_per_lb() {
+      return this.pressure_psia > 0 ? getLatentHeat(this.pressure_psia) : 0;
+    }
+
+    get vapor_saturation_temp_deg_F() {
+      return this.pressure_psia > 0 ? satSteamTemp(this.pressure_psia) : 0;
+    }
+
+    get solids_flow() {
+      return this.brix * this.flow_lb_per_hr / 100;
+    }
+
+    get pol_flow() {
+      return this.pol * this.flow_lb_per_hr / 100;
+    }
+
+    // Sets the current temp to the vapor boiling temp + boiling point
+    // elevation, useful in evaporator calculations.
+    current_temp_to_bpe_plus_vapor_temp() {
+      this.temp_deg_F = this.vapor_saturation_temp_deg_F + this.boiling_point_elevation_deg_F;
+    }
+
+    // A quick transform into syrup, convenient for clarified juice --> syrup
+    // for Pan Floor calcs.
+    evaporate(new_brix = 65, new_temp = 140) {
+      const currentSolids = this.solids_flow;
+      const newFlow = 100 / new_brix * currentSolids;
+      this.flow_lb_per_hr = newFlow;
+      this.brix = new_brix;
+      this.temp_deg_F = new_temp;
+    }
+
+    properties() {
+      return {
+        stream_id: this.stream_id,
+        brix: this.brix,
+        purity: this.purity,
+        flow_lb_per_hr: this.flow_lb_per_hr,
+        temp_deg_F: this.temp_deg_F,
+        pressure_psia: this.pressure_psia,
+        level_ft: this.level_ft,
+        pol: this.pol,
+        boiling_point_elevation_deg_F: this.boiling_point_elevation_deg_F,
+        cp_btu_per_lb_deg_F: this.cp_btu_per_lb_deg_F,
+        specific_gravity: this.specific_gravity,
+        cu_ft_hr: this.cu_ft_hr,
+        latent_heat_btu_per_lb: this.latent_heat_btu_per_lb,
+        vapor_saturation_temp_deg_F: this.vapor_saturation_temp_deg_F,
+        solids_flow: this.solids_flow,
+        pol_flow: this.pol_flow,
+      };
+    }
+
+    static copy(stream, overrides = {}) {
+      return new SugarStream(Object.assign({
+        brix: stream.brix,
+        purity: stream.purity,
+        flow_lb_per_hr: stream.flow_lb_per_hr,
+        temp_deg_F: stream.temp_deg_F,
+        pressure_psia: stream.pressure_psia,
+        level_ft: stream.level_ft,
+      }, overrides));
+    }
+  }
+
+  SugarStream._properties = { bpeBrix, bpeHead, satSteamTemp, bpeTotal, getLatentHeat, getCp, specificGravity };
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = SugarStream;
+  } else {
+    root.SugarStream = SugarStream;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// Port of Bagasse.py — bagasse composition + GCV (gross calorific value).
+
+(function (root) {
+  'use strict';
+
+  class Bagasse {
+    constructor({ moisture_pct, brix_pct, pol_pct, ash_pct, flowrate_lb_hr }) {
+      this.moisture_pct = moisture_pct;
+      this.brix_pct = brix_pct;
+      this.pol_pct = pol_pct;
+      this.ash_pct = ash_pct;
+      this.flowrate_lb_hr = flowrate_lb_hr;
+    }
+
+    get fiber_pct() {
+      return 100 - this.moisture_pct - this.brix_pct;
+    }
+
+    get gcv() {
+      const M = this.moisture_pct;
+      const A = this.ash_pct;
+      const B = this.brix_pct;
+      return (19605 - 196.05 * M - 196.05 * A - 31.14 * B) * 0.4299;
+    }
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = Bagasse;
+  } else {
+    root.Bagasse = Bagasse;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// Port of MillFloor.py — mill floor material balance for a counter-current
+// cane milling train. All mass balance calculations run in the constructor;
+// results are stored as instance properties, mirroring the Python class.
+
+(function (root) {
+  'use strict';
+
+  const SugarStream = (typeof module !== 'undefined' && module.exports) ? require('./sugar_stream.js') : root.SugarStream;
+  const Bagasse = (typeof module !== 'undefined' && module.exports) ? require('./bagasse.js') : root.Bagasse;
+
+  class MillFloor {
+    constructor({
+      cane_tpd,
+      cane_pol_pct,
+      cane_fiber_pct,
+      imbibition_pct_on_cane,
+      bagasse_pol_pct,
+      last_roll_purity,
+      bagasse_moisture_pct,
+      mix_juice_purity,
+      number_of_mills,
+      juice_temp_F = 90.0,
+      bagasse_ash_pct = 2.0,
+      mill_1_fiber_rise_load_fraction = 0.35,
+      name = 'Mill Floor',
+    }) {
+      this.name = name;
+      this.cane_tpd = cane_tpd;
+      this.cane_tph = this.cane_tpd / 24;
+      this.cane_lb_hr = this.cane_tpd * 2000 / 24;
+      this.cane_pol_pct = cane_pol_pct;
+      this.cane_fiber_pct = cane_fiber_pct;
+      this.imbibition_pct_on_cane = imbibition_pct_on_cane;
+      this.imbibition_lb_hr = this.imbibition_pct_on_cane / 100 * this.cane_lb_hr;
+      this.imbibition_tph = this.imbibition_lb_hr / 2000;
+      this.bagasse_pol_pct = bagasse_pol_pct;
+      this.last_roll_purity = last_roll_purity;
+      this.bagasse_moisture_pct = bagasse_moisture_pct;
+      this.bagasse_ash_pct = bagasse_ash_pct;
+      this.mix_juice_purity = mix_juice_purity;
+      this.number_of_mills = number_of_mills;
+      this.juice_temp_F = juice_temp_F;
+      this.mill_1_fiber_rise_load_fraction = mill_1_fiber_rise_load_fraction;
+
+      // -- Imbibition --------------------------------------------------------
+      const imb_tpd = cane_tpd * imbibition_pct_on_cane / 100;
+      const imb_gpm = imb_tpd * 2000 / 24 / 60 / 8.3;
+
+      // -- Bagasse -------------------------------------------------------------
+      const bag_brix_pct = bagasse_pol_pct / last_roll_purity * 100;
+      const bag_fiber_pct = 100 - bag_brix_pct - bagasse_moisture_pct;
+      const bag_tpd = cane_tpd * cane_fiber_pct / bag_fiber_pct;
+
+      // -- Mixed Juice -----------------------------------------------------
+      const mix_juice_tpd = cane_tpd + imb_tpd - bag_tpd;
+      const tons_pol_juice = cane_tpd * cane_pol_pct / 100 - bag_tpd * bagasse_pol_pct / 100;
+      const tons_brix_juice = tons_pol_juice * 100 / mix_juice_purity;
+      const mix_juice_brix = tons_brix_juice / mix_juice_tpd * 100;
+      const mix_juice_pol = mix_juice_brix * mix_juice_purity / 100;
+      const mix_juice_lb_hr = mix_juice_tpd / 24 * 2000;
+
+      // -- Cane (back-calculated brix and moisture) -------------------------
+      const cane_brix_pct = (tons_brix_juice + bag_tpd * bag_brix_pct / 100) / cane_tpd * 100;
+      const cane_moist_pct = 100 - cane_brix_pct - cane_fiber_pct;
+      this.cane_brix_pct = cane_brix_pct;
+      this.cane_moist_pct = cane_moist_pct;
+
+      // -- Mill extraction ---------------------------------------------------
+      this.mill_extraction_pct = tons_pol_juice / (cane_tpd * cane_pol_pct / 100) * 100;
+      this.imbibition_gpm = imb_gpm;
+
+      // -- Per-mill intermediate flows (for maceration pump sizing) ----------
+      const tons_fiber = cane_tpd * cane_fiber_pct / 100;
+      const fib_change = bag_fiber_pct - cane_fiber_pct;
+      const mill_1_bag_fib = cane_fiber_pct + mill_1_fiber_rise_load_fraction * fib_change;
+      const fib_step = (bag_fiber_pct - mill_1_bag_fib) / Math.max(number_of_mills - 1, 1);
+
+      const fiber_list = [mill_1_bag_fib];
+      for (let i = 0; i < number_of_mills - 1; i++) {
+        fiber_list.push(fiber_list[i] + fib_step);
+      }
+
+      const bag_flows = fiber_list.map((fib) => tons_fiber / (fib / 100));
+      const j1 = cane_tpd - bag_flows[0];
+      const j2 = mix_juice_tpd - j1;
+      const juice_flows = [j1, j2];
+      for (let i = 0; i < number_of_mills - 2; i++) {
+        juice_flows.push(juice_flows[i + 1] - bag_flows[i] + bag_flows[i + 1]);
+      }
+
+      const mill_balances = [];
+      for (let idx = 0; idx < number_of_mills; idx++) {
+        const mill_num = idx + 1;
+        const bag_in = idx === 0 ? cane_tpd : bag_flows[idx - 1];
+        const bag_out = bag_flows[idx];
+        const juice_out = juice_flows[idx];
+
+        let mac_in, mac_src;
+        if (mill_num === 1) {
+          mac_in = 0.0; mac_src = 'None';
+        } else if (mill_num === number_of_mills) {
+          mac_in = imb_tpd; mac_src = 'Imbibition';
+        } else {
+          mac_in = juice_flows[idx + 1];
+          mac_src = `Mill ${mill_num + 1} maceration`;
+        }
+
+        const dest = mill_num <= 2 ? 'To process' : `Mill ${mill_num - 1} maceration`;
+        mill_balances.push({
+          mill: mill_num,
+          bagasse_in_tpd: bag_in,
+          mac_in_tpd: mac_in,
+          mac_in_source: mac_src,
+          bagasse_out_tpd: bag_out,
+          juice_out_tpd: juice_out,
+          juice_out_dest: dest,
+        });
+      }
+
+      this.mill_balances = mill_balances;
+
+      // -- Mixed juice output --------------------------------------------------
+      this.mixed_juice_stream = new SugarStream({
+        brix: mix_juice_brix,
+        purity: mix_juice_purity,
+        flow_lb_per_hr: mix_juice_lb_hr,
+        temp_deg_F: juice_temp_F,
+        pressure_psia: 14.7,
+        level_ft: 0,
+      });
+
+      // -- Bagasse output --------------------------------------------------
+      this.bagasse_stream = new Bagasse({
+        moisture_pct: bagasse_moisture_pct,
+        brix_pct: bag_brix_pct,
+        pol_pct: bagasse_pol_pct,
+        ash_pct: bagasse_ash_pct,
+        flowrate_lb_hr: bag_tpd / 24 * 2000,
+      });
+    }
+
+    get balance_check() {
+      const mj = this.mixed_juice_stream;
+      const bag = this.bagasse_stream;
+
+      const mj_tph = mj.flow_lb_per_hr / 2000;
+      const mj_brix_tph = mj.solids_flow / 2000;
+      const mj_pol_tph = mj.pol_flow / 2000;
+      const mj_moist_tph = mj_tph - mj_brix_tph;
+
+      const bag_tph = bag.flowrate_lb_hr / 2000;
+      const bag_brix_tph = bag_tph * bag.brix_pct / 100;
+      const bag_pol_tph = bag_tph * bag.pol_pct / 100;
+      const bag_fiber_tph = bag_tph * bag.fiber_pct / 100;
+      const bag_moist_tph = bag_tph * bag.moisture_pct / 100;
+
+      const total_in = this.cane_tph + this.imbibition_tph;
+      const total_out = mj_tph + bag_tph;
+
+      const pol_in = this.cane_tph * this.cane_pol_pct / 100;
+      const pol_out = mj_pol_tph + bag_pol_tph;
+
+      const brix_in = this.cane_tph * this.cane_brix_pct / 100;
+      const brix_out = mj_brix_tph + bag_brix_tph;
+
+      const fiber_in = this.cane_tph * this.cane_fiber_pct / 100;
+      const fiber_out = bag_fiber_tph;
+
+      const water_in = this.cane_tph * this.cane_moist_pct / 100 + this.imbibition_tph;
+      const water_out = mj_moist_tph + bag_moist_tph;
+
+      return {
+        total: { in_tph: total_in, out_tph: total_out, diff_tph: total_in - total_out },
+        pol: { in_tph: pol_in, out_tph: pol_out, diff_tph: pol_in - pol_out },
+        brix: { in_tph: brix_in, out_tph: brix_out, diff_tph: brix_in - brix_out },
+        fiber: { in_tph: fiber_in, out_tph: fiber_out, diff_tph: fiber_in - fiber_out },
+        water: { in_tph: water_in, out_tph: water_out, diff_tph: water_in - water_out },
+      };
+    }
+
+    // Stream component flows (TPH) as data: { rows, in_tot, out_tot }.
+    _stream_table_rows() {
+      const mj = this.mixed_juice_stream;
+      const bag = this.bagasse_stream;
+
+      const mj_tph = mj.flow_lb_per_hr / 2000;
+      const mj_brix_tph = mj.solids_flow / 2000;
+      const mj_pol_tph = mj.pol_flow / 2000;
+      const mj_water_tph = mj_tph - mj_brix_tph;
+
+      const bag_tph = bag.flowrate_lb_hr / 2000;
+      const bag_pol_tph = bag_tph * bag.pol_pct / 100;
+      const bag_brix_tph = bag_tph * bag.brix_pct / 100;
+      const bag_fiber_tph = bag_tph * bag.fiber_pct / 100;
+      const bag_water_tph = bag_tph * bag.moisture_pct / 100;
+
+      const cane_pol_tph = this.cane_tph * this.cane_pol_pct / 100;
+      const cane_brix_tph = this.cane_tph * this.cane_brix_pct / 100;
+      const cane_fiber_tph = this.cane_tph * this.cane_fiber_pct / 100;
+      const cane_water_tph = this.cane_tph * this.cane_moist_pct / 100;
+
+      const rows = [
+        ['Cane', 'In', this.cane_tph, cane_pol_tph, cane_brix_tph, cane_fiber_tph, cane_water_tph],
+        ['Imbibition', 'In', this.imbibition_tph, 0.0, 0.0, 0.0, this.imbibition_tph],
+        ['Mixed Juice', 'Out', mj_tph, mj_pol_tph, mj_brix_tph, 0.0, mj_water_tph],
+        ['Bagasse', 'Out', bag_tph, bag_pol_tph, bag_brix_tph, bag_fiber_tph, bag_water_tph],
+      ];
+
+      const in_tot = [0, 0, 0, 0, 0];
+      const out_tot = [0, 0, 0, 0, 0];
+      for (const [, direction, ...vals] of rows) {
+        const totals = direction === 'In' ? in_tot : out_tot;
+        vals.forEach((v, i) => { totals[i] += v; });
+      }
+      return { rows, in_tot, out_tot };
+    }
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = MillFloor;
+  } else {
+    root.MillFloor = MillFloor;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// Port of Clarification.py — clarification section material balance for a
+// single-clarifier cane sugar factory. All mass balance calculations run in
+// the constructor; the clarified juice output is a SugarStream so this unit
+// can chain directly into juice heating / evaporation / pan floor.
+
+(function (root) {
+  'use strict';
+
+  const SugarStream = (typeof module !== 'undefined' && module.exports) ? require('./sugar_stream.js') : root.SugarStream;
+
+  function specificGravity(brix) {
+    return (
+      62.2511
+      + 0.24081 * brix
+      + 0.0007902404 * brix ** 2
+      + 0.00000423954 * brix ** 3
+      - 0.00000001657193 * brix ** 4
+    ) / 62.4;
+  }
+
+  function getCp(brix) {
+    return 0.9964 - 0.005656 * brix;
+  }
+
+  class Clarification {
+    constructor({
+      mixed_juice_stream,
+      cane_tpd,
+      filter_wash_water_pct_on_cane,
+      filter_cake_pct_on_cane,
+      filter_cake_pol_pct,
+      clarified_juice_purity,
+      limed_juice_cold_temp_f = 85.0,
+      limed_juice_hot_temp_f = 220.0,
+      clarified_juice_temp_f = 205.0,
+      lime_lb_per_ton_cane = 1.3,
+      lime_baume = 10,
+      polymer_lb_per_ton_cane = 0.045,
+      polymer_conc_ppm = 5000,
+      clarifier_underflow_pct_cane = 20,
+      name = 'Clarification',
+    }) {
+      this.name = name;
+      this.cane_tpd = cane_tpd;
+      this.filter_wash_water_pct_on_cane = filter_wash_water_pct_on_cane;
+      this.filter_cake_pct_on_cane = filter_cake_pct_on_cane;
+      this.filter_cake_pol_pct = filter_cake_pol_pct;
+      this.clarified_juice_purity = clarified_juice_purity;
+      this.limed_juice_cold_temp_f = limed_juice_cold_temp_f;
+      this.limed_juice_hot_temp_f = limed_juice_hot_temp_f;
+      this.clarified_juice_temp_f = clarified_juice_temp_f;
+      this.lime_lb_per_ton_cane = lime_lb_per_ton_cane;
+      this.lime_baume = lime_baume;
+      this.polymer_lb_per_ton_cane = polymer_lb_per_ton_cane;
+      this.polymer_conc_ppm = polymer_conc_ppm;
+      this.clarifier_underflow_pct_cane = clarifier_underflow_pct_cane;
+
+      const FLASH_TEMP_F = 212.0;
+
+      // -- Unpack mixed juice from SugarStream --------------------------------
+      const mj_lb_hr = mixed_juice_stream.flow_lb_per_hr;
+      const mj_brix_pct = mixed_juice_stream.brix;
+      const mj_purity = mixed_juice_stream.purity;
+      const mj_temp_f = mixed_juice_stream.temp_deg_F;
+      const mj_pol_pct = mj_brix_pct * mj_purity / 100;
+
+      const cane_lb_hr = cane_tpd * 2000 / 24;
+
+      // -- Fixed external inputs (lb/hr) --------------------------------------
+      const lime_lb_hr = cane_tpd * lime_lb_per_ton_cane / 24;
+      const lime_water_lb_hr = lime_lb_hr / (lime_baume / 100) - lime_lb_hr;
+      const polymer_lb_hr = cane_tpd * polymer_lb_per_ton_cane / 24;
+      const poly_water_lb_hr = polymer_lb_hr * 10 ** 6 / polymer_conc_ppm - polymer_lb_hr;
+      const wash_water_lb_hr = cane_lb_hr * filter_wash_water_pct_on_cane / 100;
+      const fc_lb_hr = cane_lb_hr * filter_cake_pct_on_cane / 100;
+      const mol_lb_hr = lime_lb_hr + lime_water_lb_hr;
+      const poly_sol_lb_hr = polymer_lb_hr + poly_water_lb_hr;
+      const fixed_lb_hr = mj_lb_hr + mol_lb_hr + poly_sol_lb_hr;
+
+      // -- MJ brix/pol (lb/hr) -------------------------------------------------
+      const mj_brix_lb_hr = mj_lb_hr * mj_brix_pct / 100;
+      const mj_pol_lb_hr = mj_lb_hr * mj_pol_pct / 100;
+      const fc_pol_lb_hr = fc_lb_hr * filter_cake_pol_pct / 100;
+
+      // -- CJ brix/pol -- external pol and brix balances ----------------------
+      const cj_pol_lb_hr = mj_pol_lb_hr - fc_pol_lb_hr;
+      const cj_brix_lb_hr = cj_pol_lb_hr * 100 / clarified_juice_purity;
+
+      // -- Filter cake brix ------------------------------------------------
+      const fc_brix_lb_hr = mj_brix_lb_hr - cj_brix_lb_hr;
+      const fc_purity = fc_pol_lb_hr / fc_brix_lb_hr * 100;
+      const fc_brix_pct = fc_brix_lb_hr / fc_lb_hr * 100;
+
+      // -- Clarifier underflow -------------------------------------------------
+      const uf_brix_pct = mj_brix_pct;
+      const uf_pol_pct = uf_brix_pct * fc_purity / 100;
+      const uf_lb_hr = clarifier_underflow_pct_cane / 100 * cane_lb_hr;
+      const uf_pol_lb_hr = uf_lb_hr * uf_pol_pct / 100;
+      const uf_brix_lb_hr = uf_lb_hr * uf_brix_pct / 100;
+
+      // -- Rotary filter -- filtrate = underflow + wash - cake -----------------
+      const filtrate_lb_hr = wash_water_lb_hr + uf_lb_hr - fc_lb_hr;
+      const filtrate_pol_lb_hr = uf_pol_lb_hr - fc_pol_lb_hr;
+      const filtrate_brix_lb_hr = uf_brix_lb_hr - fc_brix_lb_hr;
+      const filtrate_brix_pct = filtrate_brix_lb_hr / filtrate_lb_hr * 100;
+      const filtrate_pol_pct = filtrate_pol_lb_hr / filtrate_lb_hr * 100;
+      const filtrate_purity = filtrate_pol_lb_hr / filtrate_brix_lb_hr * 100;
+
+      // -- Limed juice -------------------------------------------------------
+      const lj_lb_hr = fixed_lb_hr + filtrate_lb_hr;
+      const lj_brix_lb_hr = mj_brix_lb_hr + filtrate_brix_lb_hr;
+      const lj_pol_lb_hr = mj_pol_lb_hr + filtrate_pol_lb_hr;
+      const lj_brix_pct = lj_brix_lb_hr / lj_lb_hr * 100;
+      const lj_pol_pct = lj_pol_lb_hr / lj_lb_hr * 100;
+
+      // -- Flash tank ----------------------------------------------------------
+      const flash_vapor_lb_hr = limed_juice_hot_temp_f > 212
+        ? lj_lb_hr * (limed_juice_hot_temp_f - 212) * getCp(lj_brix_pct) / 970
+        : 0;
+      const fj_lb_hr = lj_lb_hr - flash_vapor_lb_hr;
+      const fj_brix_lb_hr = lj_brix_lb_hr;
+      const fj_pol_lb_hr = lj_pol_lb_hr;
+      const fj_brix_pct = fj_brix_lb_hr / fj_lb_hr * 100;
+      const fj_pol_pct = fj_pol_lb_hr / fj_lb_hr * 100;
+
+      // -- Clarified juice -------------------------------------------------
+      const cj_lb_hr = fixed_lb_hr + wash_water_lb_hr - fc_lb_hr - flash_vapor_lb_hr;
+      const cj_pol_pct = cj_pol_lb_hr / cj_lb_hr * 100;
+      const cj_brix_pct = cj_brix_lb_hr / cj_lb_hr * 100;
+
+      // -- Scalar outputs --------------------------------------------------
+      this.flash_vapor_pct = flash_vapor_lb_hr / lj_lb_hr * 100;
+      this.filter_cake_pol_lb_per_day = fc_pol_lb_hr * 24;
+      this.filter_wash_water_lb_hr = wash_water_lb_hr;
+
+      // -- Clarified juice output stream ---------------------------------------
+      this.clarified_juice_stream = new SugarStream({
+        brix: cj_brix_pct,
+        purity: clarified_juice_purity,
+        flow_lb_per_hr: cj_lb_hr,
+        temp_deg_F: clarified_juice_temp_f,
+        pressure_psia: 14.7,
+        level_ft: 0,
+      });
+
+      // also include the Limed Juice as an output stream for use in JuiceHeating
+      this.limed_juice_cold_stream = new SugarStream({
+        brix: lj_brix_pct,
+        purity: lj_pol_lb_hr / lj_brix_lb_hr * 100,
+        flow_lb_per_hr: lj_lb_hr,
+        temp_deg_F: limed_juice_cold_temp_f,
+      });
+
+      // -- Stream table ------------------------------------------------------
+      const gpm = (lb_hr, sg) => lb_hr / (sg * 8.34 * 60);
+
+      const raw = [
+        ['Mixed Juice', 'In', mj_lb_hr, mj_brix_pct, mj_pol_pct, mj_temp_f],
+        ['Lime', 'In', lime_lb_hr, 0.0, 0.0, null],
+        ['Water for Lime', 'In', lime_water_lb_hr, 0.0, 0.0, null],
+        ['Polymer', 'In', polymer_lb_hr, 0.0, 0.0, null],
+        ['Polymer Water', 'In', poly_water_lb_hr, 0.0, 0.0, null],
+        ['Filter Wash Water', 'In', wash_water_lb_hr, 0.0, 0.0, null],
+        ['Flash Vapors', 'Out', flash_vapor_lb_hr, 0.0, 0.0, FLASH_TEMP_F],
+        ['Clarified Juice', 'Out', cj_lb_hr, cj_brix_pct, cj_pol_pct, clarified_juice_temp_f],
+        ['Filter Cake', 'Out', fc_lb_hr, fc_brix_pct, filter_cake_pol_pct, null],
+        ['Milk of Lime', 'Internal', mol_lb_hr, 0.0, 0.0, null],
+        ['Polymer Solution', 'Internal', poly_sol_lb_hr, 0.0, 0.0, null],
+        ['Limed Juice Cold', 'Internal', lj_lb_hr, lj_brix_pct, lj_pol_pct, limed_juice_cold_temp_f],
+        ['Limed Juice Hot', 'Internal', lj_lb_hr, lj_brix_pct, lj_pol_pct, limed_juice_hot_temp_f],
+        ['Flashed Juice', 'Internal', fj_lb_hr, fj_brix_pct, fj_pol_pct, FLASH_TEMP_F],
+        ['Clarifier Underflow', 'Internal', uf_lb_hr, uf_brix_pct, uf_pol_pct, null],
+        ['Filtrate', 'Internal', filtrate_lb_hr, filtrate_brix_pct, filtrate_pol_pct, null],
+      ];
+
+      this.streams = {};
+      for (const [sname, direction, lb_hr, brix, pol, temp] of raw) {
+        const purity = brix > 0 ? pol / brix * 100 : 0.0;
+        const sg = brix > 0 ? specificGravity(brix) : 1.0;
+        this.streams[sname] = {
+          direction,
+          lb_per_hr: lb_hr,
+          gpm: gpm(lb_hr, sg),
+          brix_pct: brix,
+          pol_pct: pol,
+          purity_pct: purity,
+          sg,
+          brix_lb_per_hr: lb_hr * brix / 100,
+          pol_lb_per_hr: lb_hr * pol / 100,
+          pct_on_cane: lb_hr / cane_lb_hr * 100,
+          temp_f: temp,
+        };
+      }
+    }
+
+    get balance_check() {
+      const keys = ['lb_per_hr', 'brix_lb_per_hr', 'pol_lb_per_hr'];
+      const totals = { in: {}, out: {}, difference: {} };
+      const streams = Object.values(this.streams);
+      for (const key of keys) {
+        const in_ = streams.filter((s) => s.direction === 'In').reduce((a, s) => a + s[key], 0);
+        const out_ = streams.filter((s) => s.direction === 'Out').reduce((a, s) => a + s[key], 0);
+        totals.in[key] = in_;
+        totals.out[key] = out_;
+        totals.difference[key] = in_ - out_;
+      }
+      return totals;
+    }
+
+    // Numbered stream rows in Python's `_collect_streams(clar)` diagram order
+    // (see clarification_diagram.py's TAG_ORDER).
+    _collect_streams() {
+      const TAG_ORDER = [
+        'Mixed Juice', 'Lime', 'Water for Lime', 'Polymer', 'Polymer Water',
+        'Filter Wash Water',
+        'Flash Vapors', 'Clarified Juice', 'Filter Cake',
+        'Milk of Lime', 'Polymer Solution', 'Limed Juice Cold', 'Limed Juice Hot',
+        'Flashed Juice', 'Clarifier Underflow', 'Filtrate',
+      ];
+      return TAG_ORDER.map((name, i) => {
+        const s = this.streams[name];
+        return [
+          i + 1, name, s.direction, s.lb_per_hr, s.gpm, s.brix_lb_per_hr,
+          s.pol_lb_per_hr, s.brix_pct, s.pol_pct,
+          s.brix_pct > 0 ? s.purity_pct : null,
+          s.pct_on_cane, s.temp_f,
+        ];
+      });
+    }
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = Clarification;
+  } else {
+    root.Clarification = Clarification;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
 (function () {
   'use strict';
 
   const TABS = [
     { id: 'steam', label: 'Steam Tables', enabled: true },
-    { id: 'mill', label: 'Mill Floor', enabled: false },
-    { id: 'clar', label: 'Clarification', enabled: false },
+    { id: 'mill', label: 'Mill Floor', enabled: true },
+    { id: 'clar', label: 'Clarification', enabled: true },
     { id: 'heat', label: 'Juice Heating', enabled: false },
     { id: 'pan', label: 'Pan Floor', enabled: false },
     { id: 'evap', label: 'Evaporation', enabled: false },
@@ -839,9 +1535,237 @@ tbody tr:nth-child(even) { background: var(--table-band); }
     });
   }
 
+  // ---------------------------------------------------------------------
+  // Shared plant state -- lets later tabs (Clarification, ...) chain off
+  // the mill floor's mixed juice / bagasse streams once it has been solved.
+  // ---------------------------------------------------------------------
+  const PlantState = { mill: null, clar: null };
+
+  function inputField(id, label, value, step) {
+    return `<div><label for="${id}">${label}</label><input id="${id}" type="number" step="${step || 'any'}" value="${value}"></div>`;
+  }
+
+  function readFields(section, ids) {
+    const out = {};
+    ids.forEach((id) => { out[id] = parseFloat(section.querySelector('#' + id).value); });
+    return out;
+  }
+
+  function fmt(v, digits) {
+    if (v === null || v === undefined || Number.isNaN(v)) return '-';
+    return v.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  }
+
+  function renderTable(headers, rows) {
+    const thead = '<thead><tr>' + headers.map((h) => `<th>${h}</th>`).join('') + '</tr></thead>';
+    const tbody = '<tbody>' + rows.map((r) => '<tr>' + r.map((c) => `<td>${c}</td>`).join('') + '</tr>').join('') + '</tbody>';
+    return `<div class="table-wrap"><table>${thead}${tbody}</table></div>`;
+  }
+
+  // ---------------------------------------------------------------------
+  // Mill Floor tab
+  // ---------------------------------------------------------------------
+  function buildMillTab() {
+    const section = document.getElementById('tab-mill');
+    section.innerHTML = `
+      <div class="panel">
+        <h2>Mill Floor Inputs</h2>
+        <div class="grid">
+          ${inputField('mf-cane_tpd', 'Cane throughput (TPD)', 19000, 100)}
+          ${inputField('mf-cane_pol_pct', 'Cane pol (%)', 13.5, 0.1)}
+          ${inputField('mf-cane_fiber_pct', 'Cane fiber (%)', 14.0, 0.1)}
+          ${inputField('mf-number_of_mills', 'Number of mills', 6, 1)}
+          ${inputField('mf-mill_1_fiber_rise_load_fraction', 'Mill 1 fiber rise load fraction', 0.35, 0.01)}
+          ${inputField('mf-imbibition_pct_on_cane', 'Imbibition (% on cane)', 30.0, 0.5)}
+          ${inputField('mf-juice_temp_F', 'Juice temperature (F)', 90.0, 1)}
+          ${inputField('mf-mix_juice_purity', 'Mixed juice purity (%)', 88.0, 0.1)}
+          ${inputField('mf-bagasse_pol_pct', 'Bagasse pol (%)', 2.1, 0.1)}
+          ${inputField('mf-last_roll_purity', 'Last roll juice purity (%)', 72.0, 0.5)}
+          ${inputField('mf-bagasse_moisture_pct', 'Bagasse moisture (%)', 49.5, 0.5)}
+          ${inputField('mf-bagasse_ash_pct', 'Bagasse ash (%)', 5.0, 0.5)}
+        </div>
+        <p><button class="primary" id="mf-calc">Calculate</button></p>
+        <div id="mf-result"></div>
+      </div>`;
+
+    const resultDiv = section.querySelector('#mf-result');
+
+    section.querySelector('#mf-calc').addEventListener('click', () => {
+      try {
+        const v = readFields(section, [
+          'mf-cane_tpd', 'mf-cane_pol_pct', 'mf-cane_fiber_pct', 'mf-number_of_mills',
+          'mf-mill_1_fiber_rise_load_fraction', 'mf-imbibition_pct_on_cane', 'mf-juice_temp_F',
+          'mf-mix_juice_purity', 'mf-bagasse_pol_pct', 'mf-last_roll_purity',
+          'mf-bagasse_moisture_pct', 'mf-bagasse_ash_pct',
+        ]);
+
+        const mill = new MillFloor({
+          cane_tpd: v['mf-cane_tpd'],
+          cane_pol_pct: v['mf-cane_pol_pct'],
+          cane_fiber_pct: v['mf-cane_fiber_pct'],
+          imbibition_pct_on_cane: v['mf-imbibition_pct_on_cane'],
+          bagasse_pol_pct: v['mf-bagasse_pol_pct'],
+          last_roll_purity: v['mf-last_roll_purity'],
+          bagasse_moisture_pct: v['mf-bagasse_moisture_pct'],
+          bagasse_ash_pct: v['mf-bagasse_ash_pct'],
+          mix_juice_purity: v['mf-mix_juice_purity'],
+          number_of_mills: Math.round(v['mf-number_of_mills']),
+          juice_temp_F: v['mf-juice_temp_F'],
+          mill_1_fiber_rise_load_fraction: v['mf-mill_1_fiber_rise_load_fraction'],
+          name: 'Mill Floor',
+        });
+
+        PlantState.mill = mill;
+
+        const mj = mill.mixed_juice_stream;
+        const bag = mill.bagasse_stream;
+
+        const metrics = `
+          <div class="metrics">
+            <div class="metric"><div class="metric-label">Mill extraction</div><div class="metric-value">${fmt(mill.mill_extraction_pct, 2)}%</div></div>
+            <div class="metric"><div class="metric-label">Mixed juice flow</div><div class="metric-value">${fmt(mj.flow_lb_per_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">Mixed juice brix / purity</div><div class="metric-value">${fmt(mj.brix, 2)}% / ${fmt(mj.purity, 1)}%</div></div>
+            <div class="metric"><div class="metric-label">Bagasse flow</div><div class="metric-value">${fmt(bag.flowrate_lb_hr / 2000 * 24, 0)} TPD</div></div>
+          </div>`;
+
+        const { rows, in_tot, out_tot } = mill._stream_table_rows();
+        const diff = in_tot.map((x, i) => x - out_tot[i]);
+        const streamRows = rows.map(([name, dir, ...vals]) => [name, dir, ...vals.map((x) => fmt(x, 2))]);
+        streamRows.push(['Total In', '', ...in_tot.map((x) => fmt(x, 2))]);
+        streamRows.push(['Total Out', '', ...out_tot.map((x) => fmt(x, 2))]);
+        streamRows.push(['Difference', '', ...diff.map((x) => fmt(x, 4))]);
+        const streamTable = renderTable(
+          ['Stream', 'Dir', 'Flow (TPH)', 'Pol (TPH)', 'Brix (TPH)', 'Fiber (TPH)', 'Water (TPH)'],
+          streamRows,
+        );
+
+        const mbRows = mill.mill_balances.map((m) => [
+          m.mill, fmt(m.bagasse_in_tpd, 1), fmt(m.mac_in_tpd, 1), m.mac_in_source,
+          fmt(m.bagasse_out_tpd, 1), fmt(m.juice_out_tpd, 1), m.juice_out_dest,
+        ]);
+        const mbTable = renderTable(
+          ['Mill', 'Bagasse In', 'Liquid In', 'Liquid In Source', 'Bagasse Out', 'Juice Out', 'Juice Out Dest'],
+          mbRows,
+        );
+
+        const bal = mill.balance_check;
+        const balRows = Object.entries(bal).map(([k, v]) => [k, fmt(v.in_tph, 4), fmt(v.out_tph, 4), fmt(v.diff_tph, 6)]);
+        const balTable = renderTable(['Quantity', 'In (TPH)', 'Out (TPH)', 'Diff (TPH)'], balRows);
+
+        resultDiv.innerHTML = metrics +
+          '<h3 class="section-title">Stream Table (TPH)</h3>' + streamTable +
+          '<h3 class="section-title">Per-Mill Maceration Balance (TPD)</h3>' + mbTable +
+          '<h3 class="section-title">Balance Check</h3>' + balTable;
+      } catch (e) {
+        resultDiv.innerHTML = `<p class="error">${e.message}</p>`;
+      }
+    });
+
+    section.querySelector('#mf-calc').click();
+  }
+
+  // ---------------------------------------------------------------------
+  // Clarification tab
+  // ---------------------------------------------------------------------
+  function buildClarTab() {
+    const section = document.getElementById('tab-clar');
+    section.innerHTML = `
+      <div class="panel">
+        <h2>Clarification Inputs</h2>
+        <div class="grid">
+          ${inputField('cl-filter_wash_water_pct_on_cane', 'Filter wash water (% on cane)', 5.0, 0.5)}
+          ${inputField('cl-filter_cake_pct_on_cane', 'Filter cake (% on cane)', 5.0, 0.5)}
+          ${inputField('cl-filter_cake_pol_pct', 'Filter cake pol (%)', 2.4, 0.1)}
+          ${inputField('cl-clarified_juice_purity', 'Clarified juice purity (%)', 88.5, 0.1)}
+          ${inputField('cl-limed_juice_cold_temp_f', 'Limed juice cold temp (F)', 95.0, 1)}
+          ${inputField('cl-limed_juice_hot_temp_f', 'Limed juice hot temp (F)', 220.0, 1)}
+          ${inputField('cl-clarified_juice_temp_f', 'Clarified juice temp (F)', 205.0, 1)}
+          ${inputField('cl-lime_lb_per_ton_cane', 'Lime dose (lb/ton cane)', 1.3, 0.1)}
+          ${inputField('cl-lime_baume', 'Milk of lime (Baume)', 10.0, 0.5)}
+          ${inputField('cl-polymer_conc_ppm', 'Polymer concentration (ppm)', 5000.0, 100)}
+          ${inputField('cl-polymer_lb_per_ton_cane', 'Polymer dose (lb/ton cane)', 0.045, 0.005)}
+          ${inputField('cl-clarifier_underflow_pct_cane', 'Clarifier underflow (% on cane)', 20.0, 0.5)}
+        </div>
+        <p><button class="primary" id="cl-calc">Calculate</button></p>
+        <div id="cl-result"></div>
+      </div>`;
+
+    const resultDiv = section.querySelector('#cl-result');
+
+    section.querySelector('#cl-calc').addEventListener('click', () => {
+      if (!PlantState.mill) {
+        resultDiv.innerHTML = '<p class="error">Solve the Mill Floor tab first -- Clarification needs its mixed juice stream.</p>';
+        return;
+      }
+      try {
+        const v = readFields(section, [
+          'cl-filter_wash_water_pct_on_cane', 'cl-filter_cake_pct_on_cane', 'cl-filter_cake_pol_pct',
+          'cl-clarified_juice_purity', 'cl-limed_juice_cold_temp_f', 'cl-limed_juice_hot_temp_f',
+          'cl-clarified_juice_temp_f', 'cl-lime_lb_per_ton_cane', 'cl-lime_baume',
+          'cl-polymer_conc_ppm', 'cl-polymer_lb_per_ton_cane', 'cl-clarifier_underflow_pct_cane',
+        ]);
+
+        const clar = new Clarification({
+          mixed_juice_stream: PlantState.mill.mixed_juice_stream,
+          cane_tpd: PlantState.mill.cane_tpd,
+          filter_wash_water_pct_on_cane: v['cl-filter_wash_water_pct_on_cane'],
+          filter_cake_pct_on_cane: v['cl-filter_cake_pct_on_cane'],
+          filter_cake_pol_pct: v['cl-filter_cake_pol_pct'],
+          clarified_juice_purity: v['cl-clarified_juice_purity'],
+          limed_juice_cold_temp_f: v['cl-limed_juice_cold_temp_f'],
+          limed_juice_hot_temp_f: v['cl-limed_juice_hot_temp_f'],
+          clarified_juice_temp_f: v['cl-clarified_juice_temp_f'],
+          lime_lb_per_ton_cane: v['cl-lime_lb_per_ton_cane'],
+          lime_baume: v['cl-lime_baume'],
+          polymer_conc_ppm: v['cl-polymer_conc_ppm'],
+          polymer_lb_per_ton_cane: v['cl-polymer_lb_per_ton_cane'],
+          clarifier_underflow_pct_cane: v['cl-clarifier_underflow_pct_cane'],
+          name: 'Clarification',
+        });
+
+        PlantState.clar = clar;
+        const cj = clar.clarified_juice_stream;
+
+        const metrics = `
+          <div class="metrics">
+            <div class="metric"><div class="metric-label">Clarified juice flow</div><div class="metric-value">${fmt(cj.flow_lb_per_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">Clarified juice brix / purity</div><div class="metric-value">${fmt(cj.brix, 2)}% / ${fmt(cj.purity, 1)}%</div></div>
+            <div class="metric"><div class="metric-label">Flash vapor</div><div class="metric-value">${fmt(clar.flash_vapor_pct, 3)}%</div></div>
+            <div class="metric"><div class="metric-label">Filter cake pol loss</div><div class="metric-value">${fmt(clar.filter_cake_pol_lb_per_day, 0)} lb/day</div></div>
+          </div>`;
+
+        const streamRows = clar._collect_streams().map((r) => [
+          r[0], r[1], r[2], fmt(r[3], 0), fmt(r[4], 0), fmt(r[5], 0), fmt(r[6], 0),
+          fmt(r[7], 2), fmt(r[8], 2), r[9] === null ? '-' : fmt(r[9], 1), fmt(r[10], 2),
+          r[11] === null ? '-' : fmt(r[11], 0),
+        ]);
+        const streamTable = renderTable(
+          ['#', 'Stream', 'Dir', 'lb/hr', 'GPM', 'Brix lb/hr', 'Pol lb/hr', 'Brix %', 'Pol %', 'Purity %', '% on Cane', 'F'],
+          streamRows,
+        );
+
+        const bal = clar.balance_check;
+        const balRows = ['lb_per_hr', 'brix_lb_per_hr', 'pol_lb_per_hr'].map((k) => [
+          k, fmt(bal.in[k], 2), fmt(bal.out[k], 2), fmt(bal.difference[k], 4),
+        ]);
+        const balTable = renderTable(['Quantity', 'In', 'Out', 'Diff'], balRows);
+
+        resultDiv.innerHTML = metrics +
+          '<h3 class="section-title">Stream Table (tags match the diagram)</h3>' + streamTable +
+          '<h3 class="section-title">Balance Check</h3>' + balTable;
+      } catch (e) {
+        resultDiv.innerHTML = `<p class="error">${e.message}</p>`;
+      }
+    });
+
+    if (PlantState.mill) section.querySelector('#cl-calc').click();
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     buildTabs();
     buildSteamTab();
+    buildMillTab();
+    buildClarTab();
   });
 })();
 
