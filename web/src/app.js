@@ -9,7 +9,7 @@
     { id: 'pan', label: 'Pan Floor', enabled: false },
     { id: 'evap', label: 'Evaporation', enabled: false },
     { id: 'exhaust', label: 'Exhaust Summary', enabled: false },
-    { id: 'turb', label: 'Turbines & Boiler', enabled: false },
+    { id: 'turb', label: 'Turbines & Boiler', enabled: true },
     { id: 'cool', label: 'Cooling Tower', enabled: false },
     { id: 'cond', label: 'Condensate Balance', enabled: false },
     { id: 'export', label: 'Download', enabled: false },
@@ -156,6 +156,65 @@
     const thead = '<thead><tr>' + headers.map((h) => `<th>${h}</th>`).join('') + '</tr></thead>';
     const tbody = '<tbody>' + rows.map((r) => '<tr>' + r.map((c) => `<td>${c}</td>`).join('') + '</tr>').join('') + '</tbody>';
     return `<div class="table-wrap"><table>${thead}${tbody}</table></div>`;
+  }
+
+  function checkboxField(id, label, checked) {
+    return `<div class="checkbox-field"><input id="${id}" type="checkbox" ${checked ? 'checked' : ''}><label for="${id}" style="margin:0;">${label}</label></div>`;
+  }
+
+  // Editable row tables (name/HP/efficiency lists etc.) -- a plain grid of
+  // <input> cells, since this app has no spreadsheet-style data editor.
+  function editableRowsTable(id, columns, rows) {
+    const header = '<tr>' + columns.map((c) => `<th>${c.label}</th>`).join('') + '</tr>';
+    const body = rows.map((row, i) => '<tr>' + columns.map((c) => {
+      const inputId = `${id}-${i}-${c.key}`;
+      const type = c.type === 'text' ? 'text' : 'number';
+      const step = c.type === 'text' ? '' : ` step="${c.step || 'any'}"`;
+      return `<td><input id="${inputId}" type="${type}"${step} value="${row[c.key]}"></td>`;
+    }).join('') + '</tr>').join('');
+    return `<div class="table-wrap"><table class="editable"><thead>${header}</thead><tbody>${body}</tbody></table></div>`;
+  }
+
+  function readEditableRows(section, id, columns, count) {
+    const rows = [];
+    for (let i = 0; i < count; i++) {
+      const row = {};
+      columns.forEach((c) => {
+        const el = section.querySelector(`#${id}-${i}-${c.key}`);
+        row[c.key] = c.type === 'text' ? el.value : parseFloat(el.value);
+      });
+      rows.push(row);
+    }
+    return rows;
+  }
+
+  function fmtQuality(x) {
+    return (x === null || x === undefined || x >= 1.0) ? 'Superheat' : x.toFixed(4);
+  }
+
+  // One row per turbine unit + a TOTAL row, mirroring turbine_diagram.py's
+  // _group_info() (used by the Python app for its PFD table / Excel export).
+  function turbineGroupTable(group, { tfhList = null, skip = null } = {}) {
+    const headers = ['Unit', 'Inlet Flow (lb/hr)', 'Exhaust Avail (lb/hr)', 'HP'];
+    if (tfhList) headers.push('HP/TFH');
+    headers.push('Steam Rate (lb/HP-hr)', 'Inlet psia', 'Inlet °F', 'Outlet psia', 'Outlet °F', 'Outlet Quality');
+
+    const rows = [];
+    group.turbines.forEach((trb, i) => {
+      if (skip && skip[i]) return;
+      const ex = trb.exhaust_steam;
+      const row = [trb.name, fmt(trb.steam_flow_lb_hr, 0), fmt(trb.exhaust_available, 0), fmt(trb.hp_demand, 0)];
+      if (tfhList) row.push(fmt(tfhList[i], 1));
+      row.push(fmt(trb.steam_rate, 2), fmt(trb.inlet_steam.P, 1), fmt(trb.inlet_steam.T, 1), fmt(ex.P, 1), fmt(ex.T, 1), fmtQuality(ex.x));
+      rows.push(row);
+    });
+
+    const totalRow = ['TOTAL', fmt(group.total_inlet_flow_lb_hr, 0), fmt(group.total_exhaust_available_lb_hr, 0), fmt(group.total_hp, 0)];
+    if (tfhList) totalRow.push(fmt(tfhList.reduce((a, b) => a + b, 0), 1));
+    totalRow.push(fmt(group.total_inlet_flow_lb_hr / group.total_hp, 2), '', '', '', '', '');
+    rows.push(totalRow);
+
+    return renderTable(headers, rows);
   }
 
   // ---------------------------------------------------------------------
@@ -357,10 +416,309 @@
     if (PlantState.mill) section.querySelector('#cl-calc').click();
   }
 
+  // ---------------------------------------------------------------------
+  // Turbines & Boiler tab
+  //
+  // Mirrors streamlit_app.py's "Turbines & Boiler" tab (Cane Prep / Mill /
+  // Auxiliary turbine groups + the boiler room), with the Deaerator folded
+  // in directly rather than living on its own "Exhaust Summary" tab -- that
+  // tab's total exhaust demand is the sum of Juice Heating, Pan Floor, and
+  // Evaporation's steam consumption, none of which are ported yet. Until
+  // they are, "Additional Exhaust Required" below is a manual placeholder
+  // input standing in for that sum; the Deaerator's own steam demand is
+  // still added on top of it exactly as Boiler.py's real pipeline does.
+  // ---------------------------------------------------------------------
+  const KNF_COLS = [
+    { key: 'name', label: 'Name', type: 'text' },
+    { key: 'hp_tfh', label: 'HP per Ton Fiber/hr', step: 0.5 },
+    { key: 'eff', label: 'Isentropic Eff (%)', step: 1 },
+  ];
+  const MILL_COLS = [
+    { key: 'hp_tfh', label: 'HP per Ton Fiber/hr', step: 0.5 },
+    { key: 'eff', label: 'Isentropic Eff (%)', step: 1 },
+  ];
+  const AUX_COLS = [
+    { key: 'name', label: 'Name', type: 'text' },
+    { key: 'hp', label: 'HP', step: 5 },
+    { key: 'eff', label: 'Isentropic Eff (%)', step: 1 },
+  ];
+  const AUX_DEFAULTS = [
+    ['ID 123', 750], ['ID 4', 235], ['ID 5', 400], ['ID 6', 795], ['ID 7', 1200],
+    ['FD 7', 233], ['ID 8', 1300], ['FD 8', 350],
+    ['BFW 1', 400], ['BFW 2', 400], ['BFW 3', 400], ['JCE 1', 400],
+  ];
+
+  function buildTurbTab() {
+    const section = document.getElementById('tab-turb');
+    if (!PlantState.mill) {
+      section.innerHTML = '<div class="panel"><p class="error">Solve the Mill Floor tab first -- the turbine groups need the fiber rate.</p></div>';
+      return;
+    }
+
+    const numMills = PlantState.mill.number_of_mills;
+    const millHpDefaults = [18.0, 16.0, 16.0, 16.0, 16.0, 18.0];
+    const millRows0 = Array.from({ length: numMills }, (_, i) => ({
+      hp_tfh: i < millHpDefaults.length ? millHpDefaults[i] : 16.0,
+      eff: 50,
+    }));
+    const knfRows0 = [
+      { name: 'Knife 1', hp_tfh: 16.0, eff: 50 },
+      { name: 'Knife 2', hp_tfh: 16.0, eff: 50 },
+      { name: 'Knife 3', hp_tfh: 16.0, eff: 50 },
+    ];
+    const auxRows0 = AUX_DEFAULTS.map(([name, hp]) => ({ name, hp, eff: 50 }));
+
+    section.innerHTML = `
+      <div class="panel">
+        <h2>Live Steam Generation</h2>
+        <p class="note">The boiler header condition used as the enthalpy source for every turbine group below (throttled to each group's own inlet pressure).</p>
+        <div class="grid">
+          ${inputField('tb-live_gen_psig', 'Live steam generated (psig)', 185.0, 5)}
+          ${inputField('tb-live_gen_superheat', 'Superheat (F above sat, 0 = saturated)', 0.0, 5)}
+          ${inputField('tb-live_gen_quality', 'Quality (used if superheat = 0)', 1.0, 0.01)}
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Cane Prep (Knife) Turbines</h2>
+        <div class="grid">
+          ${inputField('tb-knf_live_psig', 'Knife live steam (psig)', 165.0, 5)}
+          ${inputField('tb-knf_exh_psig', 'Knife exhaust (psig)', 16.0, 1)}
+        </div>
+        ${editableRowsTable('tb-knf', KNF_COLS, knfRows0)}
+      </div>
+
+      <div class="panel">
+        <h2>Mill Turbines</h2>
+        <div class="grid">
+          ${inputField('tb-mill_live_psig', 'Mill live steam (psig)', 170.0, 5)}
+          ${inputField('tb-mill_exh_psig', 'Mill exhaust (psig)', 15.0, 1)}
+        </div>
+        ${editableRowsTable('tb-mill', MILL_COLS, millRows0)}
+      </div>
+
+      <div class="panel">
+        <h2>Auxiliary Turbines (fans, pumps, misc.)</h2>
+        <div class="grid">
+          <div><label for="tb-aux_group_name">Group name</label><input id="tb-aux_group_name" type="text" value="Fan and Pump Turbines"></div>
+          ${inputField('tb-aux_live_psig', 'Aux live steam (psig)', 170.0, 5)}
+          ${inputField('tb-aux_exh_psig', 'Aux exhaust (psig)', 16.0, 1)}
+        </div>
+        ${editableRowsTable('tb-aux', AUX_COLS, auxRows0)}
+      </div>
+
+      <div class="panel">
+        <h2>Losses &amp; Jets</h2>
+        <div class="grid">
+          ${inputField('tb-jets_lb_hr', 'Live steam for jets (lb/hr)', 25000.0, 1000)}
+          ${inputField('tb-loss_pct', 'Live steam losses (% of subtotal)', 2.0, 0.5)}
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Boiler Room</h2>
+        <div class="grid">
+          ${inputField('tb-blr_efficiency', 'Boiler efficiency (%)', 60.0, 1)}
+          ${inputField('tb-blr_pressure_psig', 'Boiler pressure (psig)', 185.0, 5)}
+          ${inputField('tb-blr_superheat', 'Boiler superheat (F)', 0.0, 5)}
+          ${inputField('tb-blr_capacity', 'Boiler capacity (lb/hr, 0 = unlimited)', 900000.0, 10000)}
+          ${checkboxField('tb-use_da_fw_temp', 'Feedwater temp = Deaerator water out', true)}
+          ${inputField('tb-manual_fw_temp', 'Feedwater temp (F, used if unchecked)', 230.0, 5)}
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Deaerator</h2>
+        <p class="note">Not yet its own "Exhaust Summary" tab (that needs Juice Heating / Pan Floor / Evaporation, not ported yet) -- folded in here since the Boiler's feedwater temp can depend on it.</p>
+        <div class="grid">
+          ${inputField('tb-da_psig', 'Deaerator pressure (psig)', 10.0, 1)}
+          ${inputField('tb-da_water_temp', 'Water in temp (F)', 200.0, 5)}
+          ${inputField('tb-da_water_flow', 'Water in flow (lb/hr)', 800000.0, 10000)}
+          ${inputField('tb-da_vent_pct', 'Vent (%)', 4.0, 0.5)}
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Exhaust Demand</h2>
+        <p class="note">"Additional exhaust required" stands in for Juice Heating / Pan Floor / Evaporation's steam consumption until those stages are ported -- see PROGRESS.md. The Deaerator's own steam demand is added on top of it automatically.</p>
+        <div class="grid">
+          ${inputField('tb-additional_exhaust', 'Additional exhaust required (lb/hr)', 0.0, 10000)}
+        </div>
+      </div>
+
+      <p><button class="primary" id="tb-calc">Calculate</button></p>
+      <div id="tb-result"></div>`;
+
+    const resultDiv = section.querySelector('#tb-result');
+
+    section.querySelector('#tb-calc').addEventListener('click', () => {
+      try {
+        const v = readFields(section, [
+          'tb-live_gen_psig', 'tb-live_gen_superheat', 'tb-live_gen_quality',
+          'tb-knf_live_psig', 'tb-knf_exh_psig', 'tb-mill_live_psig', 'tb-mill_exh_psig',
+          'tb-aux_live_psig', 'tb-aux_exh_psig', 'tb-jets_lb_hr', 'tb-loss_pct',
+          'tb-blr_efficiency', 'tb-blr_pressure_psig', 'tb-blr_superheat', 'tb-blr_capacity',
+          'tb-manual_fw_temp', 'tb-da_psig', 'tb-da_water_temp', 'tb-da_water_flow',
+          'tb-da_vent_pct', 'tb-additional_exhaust',
+        ]);
+        const aux_group_name = section.querySelector('#tb-aux_group_name').value;
+        const use_da_fw_temp = section.querySelector('#tb-use_da_fw_temp').checked;
+
+        const knfRows = readEditableRows(section, 'tb-knf', KNF_COLS, knfRows0.length);
+        const millRows = readEditableRows(section, 'tb-mill', MILL_COLS, millRows0.length);
+        const auxRows = readEditableRows(section, 'tb-aux', AUX_COLS, auxRows0.length);
+
+        const tons_fiber_hr = (PlantState.mill.cane_fiber_pct / 100) * PlantState.mill.cane_tph;
+
+        const live_gen_psia = v['tb-live_gen_psig'] + 14.696;
+        const live_steam_sat = new SteamStream({ P: live_gen_psia, x: 1 });
+        const live_steam_gen = v['tb-live_gen_superheat'] > 0
+          ? new SteamStream({ P: live_gen_psia, T: live_steam_sat.T + v['tb-live_gen_superheat'] })
+          : new SteamStream({ P: live_gen_psia, x: v['tb-live_gen_quality'] });
+        const groupSteam = (psig) => new SteamStream({ P: psig + 14.696, h: live_steam_gen.h });
+
+        const knf_trbs = new CanePrepTurbines({
+          name_list: knfRows.map((r) => r.name),
+          hp_ton_fiber_hr: knfRows.map((r) => r.hp_tfh),
+          isentropic_efficiency: knfRows.map((r) => r.eff),
+          live_steam_object: groupSteam(v['tb-knf_live_psig']),
+          exhaust_psia: v['tb-knf_exh_psig'] + 14.696,
+          tons_fiber_hr,
+        });
+        const mill_trbs = new MillTurbines({
+          hp_ton_fiber_hr: millRows.map((r) => r.hp_tfh),
+          isentropic_efficiency: millRows.map((r) => r.eff),
+          live_steam_object: groupSteam(v['tb-mill_live_psig']),
+          exhaust_psia: v['tb-mill_exh_psig'] + 14.696,
+          tons_fiber_hr,
+        });
+        const misc_trbs = new AuxillaryTurbines({
+          group_name: aux_group_name,
+          name_list: auxRows.map((r) => r.name),
+          hp_list: auxRows.map((r) => r.hp),
+          isentropic_efficiency: auxRows.map((r) => r.eff),
+          live_steam_object: groupSteam(v['tb-aux_live_psig']),
+          exhaust_psia: v['tb-aux_exh_psig'] + 14.696,
+        });
+
+        const live_steam_subtotal = knf_trbs.total_inlet_flow_lb_hr + mill_trbs.total_inlet_flow_lb_hr
+          + misc_trbs.total_inlet_flow_lb_hr + v['tb-jets_lb_hr'];
+        const live_steam_loss_lb_hr = (live_steam_subtotal * v['tb-loss_pct']) / 100;
+        const live_steam_total_lb_hr = live_steam_subtotal + live_steam_loss_lb_hr;
+        const exhaust_available = knf_trbs.total_exhaust_available_lb_hr + mill_trbs.total_exhaust_available_lb_hr
+          + misc_trbs.total_exhaust_available_lb_hr;
+
+        const da = new Deaerator({
+          deaerator_psig: v['tb-da_psig'],
+          water_in_deg_F: v['tb-da_water_temp'],
+          water_in_lb_hr: v['tb-da_water_flow'],
+          vent_pct: v['tb-da_vent_pct'],
+        });
+
+        const total_exhaust_required = v['tb-additional_exhaust'] + da.steam_flow_lb_hr;
+        const makeup_steam = Math.max(total_exhaust_required - exhaust_available, 0);
+
+        const fw_temp = use_da_fw_temp ? da.water_out.T : v['tb-manual_fw_temp'];
+        const blrs = new Boiler({
+          bagasse: PlantState.mill.bagasse_stream,
+          efficiency: v['tb-blr_efficiency'],
+          pressure_psig: v['tb-blr_pressure_psig'],
+          deg_superheat: v['tb-blr_superheat'],
+          feed_water_temp: fw_temp,
+          capacity: v['tb-blr_capacity'],
+          name: 'All Boilers',
+        });
+
+        PlantState.turb = { knf_trbs, mill_trbs, misc_trbs, blrs, da };
+
+        const liveSteamTable = renderTable(['Item', 'lb/hr'], [
+          ['Cane Prep Turbines', fmt(knf_trbs.total_inlet_flow_lb_hr, 0)],
+          ['Mill Turbines', fmt(mill_trbs.total_inlet_flow_lb_hr, 0)],
+          [aux_group_name, fmt(misc_trbs.total_inlet_flow_lb_hr, 0)],
+          ['Steam Jets', fmt(v['tb-jets_lb_hr'], 0)],
+          ['Live Steam Losses', fmt(live_steam_loss_lb_hr, 0)],
+          ['Total Live Steam', fmt(live_steam_total_lb_hr, 0)],
+        ]);
+
+        const metrics = `
+          <div class="metrics">
+            <div class="metric"><div class="metric-label">Total Live Steam Demand</div><div class="metric-value">${fmt(live_steam_total_lb_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">Exhaust Required</div><div class="metric-value">${fmt(total_exhaust_required, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">Exhaust Available from Turbines</div><div class="metric-value">${fmt(exhaust_available, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">Makeup Required</div><div class="metric-value">${fmt(makeup_steam, 0)} lb/hr</div></div>
+          </div>
+          <div class="metrics">
+            <div class="metric"><div class="metric-label">Steam Available from Bagasse</div><div class="metric-value">${fmt(blrs.steam_availabe_lb_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">Live Steam Demand vs. Available</div><div class="metric-value">${fmt(live_steam_total_lb_hr, 0)} / ${fmt(blrs.steam_availabe_lb_hr, 0)} lb/hr</div></div>
+          </div>`;
+
+        const fw = blrs.feed_water_stream;
+        const st = blrs.steam_stream;
+        const condition = blrs.deg_sh > 0 ? 'Superheated' : 'Saturated';
+        const bg = blrs.bagasse;
+
+        const boilerParamsTable = renderTable(['Parameter', 'Value'], [
+          ['Efficiency (%)', fmt(blrs.efficiency, 2)],
+          ['Pressure (psig)', fmt(blrs.psia - 14.696, 2)],
+          ['Pressure (psia)', fmt(blrs.psia, 2)],
+          ['Feed water temp (F)', fmt(blrs.feed_wat_temp, 2)],
+          ['Superheat (F above sat)', fmt(blrs.deg_sh, 2)],
+          ['Rated capacity (lb/hr)', fmt(blrs.capacity, 2)],
+        ]);
+        const boilerStreamsTable = renderTable(['Stream', 'Temp (F)', 'Enthalpy (BTU/lb)', 'Condition'], [
+          ['Feed Water', fmt(fw.T, 2), fmt(fw.h, 2), ''],
+          ['Steam Out', fmt(st.T, 2), fmt(st.h, 2), condition],
+        ]);
+        const boilerFuelTable = renderTable(['Fuel Property', 'Value'], [
+          ['Flowrate (lb/hr)', fmt(bg.flowrate_lb_hr, 2)],
+          ['Fiber (%)', fmt(bg.fiber_pct, 2)],
+          ['Moisture (%)', fmt(bg.moisture_pct, 2)],
+          ['Brix (%)', fmt(bg.brix_pct, 2)],
+          ['Pol (%)', fmt(bg.pol_pct, 2)],
+          ['Ash (%)', fmt(bg.ash_pct, 2)],
+          ['GCV (BTU/lb)', fmt(bg.gcv, 2)],
+        ]);
+        const boilerPerfTable = renderTable(['Metric', 'Value'], [
+          ['Heat to make 1 lb steam (BTU/lb)', fmt(blrs.btu_for_1_lb, 2)],
+          ['Steam/Bagasse ratio (lb/lb)', fmt(blrs.steam_available_per_lb_bagasse, 4)],
+          ['Steam available from bagasse (lb/hr)', fmt(blrs.steam_availabe_lb_hr, 2)],
+        ]);
+
+        const daTable = renderTable(['Stream', 'Flow (lb/hr)', 'P (psia)', 'Temp (F)'], [
+          ['Steam In', fmt(da.steam_flow_lb_hr, 0), fmt(da.psia, 2), fmt(da._steam_state.T, 1)],
+          ['Feedwater In', fmt(da.water_in_lb_hr, 0), '14.70', fmt(da.water_in_deg_F, 1)],
+          ['Water Out', fmt(da.water_out_flow_lb_hr, 0), fmt(da.psia, 2), fmt(da._water_out_state.T, 1)],
+          ['Vent', fmt(da.vent_flow_lb_hr, 0), '14.70', fmt(da._water_out_state.T, 1)],
+        ]);
+
+        const knfTfh = knfRows.map((r) => r.hp_tfh);
+        const auxHp = auxRows.map((r) => r.hp);
+
+        resultDiv.innerHTML = liveSteamTable + metrics +
+          '<h3 class="section-title">Boiler -- Parameters</h3>' + boilerParamsTable +
+          '<h3 class="section-title">Boiler -- Feed Water / Steam</h3>' + boilerStreamsTable +
+          '<h3 class="section-title">Boiler -- Bagasse Fuel</h3>' + boilerFuelTable +
+          '<h3 class="section-title">Boiler -- Performance</h3>' + boilerPerfTable +
+          '<h3 class="section-title">Deaerator -- Streams</h3>' + daTable +
+          '<h3 class="section-title">Cane Prep (Knife) Turbines -- Output</h3>' +
+          turbineGroupTable(knf_trbs, { tfhList: knfTfh, skip: knfTfh.map((x) => x === 0) }) +
+          '<h3 class="section-title">Mill Turbines -- Output</h3>' +
+          turbineGroupTable(mill_trbs, { tfhList: millRows.map((r) => r.hp_tfh) }) +
+          `<h3 class="section-title">${aux_group_name} -- Output</h3>` +
+          turbineGroupTable(misc_trbs, { skip: auxHp.map((x) => x === 0) });
+      } catch (e) {
+        resultDiv.innerHTML = `<p class="error">${e.message}</p>`;
+      }
+    });
+
+    section.querySelector('#tb-calc').click();
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     buildTabs();
     buildSteamTab();
     buildMillTab();
     buildClarTab();
+    buildTurbTab();
   });
 })();

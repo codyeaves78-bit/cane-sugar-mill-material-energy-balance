@@ -119,6 +119,13 @@ web/
     bagasse.js            <- port of Bagasse.py
     mill_floor.js         <- port of MillFloor.py
     clarification.js      <- port of Clarification.py
+    boiler.js             <- port of Boiler.py
+    turbine.js             <- port of Turbine.py
+    cogen_turbine.js        <- port of CogenTurbine.py (extends Turbine)
+    mill_turbines.js         <- port of MillTurbines.py
+    cane_prep_turbines.js    <- port of CanePrepTurbines.py
+    auxillary_turbines.js    <- port of AuxillaryTurbines.py
+    deaerator.js             <- port of Deaerator.py
     app.js                <- tab shell + per-tab UI/calc logic
     app.css               <- styling (light/dark aware)
   dev/                    <- dev-only tooling, not shipped in index.html
@@ -172,6 +179,14 @@ next session doesn't have to rediscover them.
       `AuxillaryTurbines.py`, `Deaerator.py`. This closes an end-to-end MVP
       loop (cane in → bagasse → boiler steam → turbines → exhaust) which is
       the "usable" milestone worth a PR to `main` for the user to try.
+      - [x] **Phase 2a — Boiler + Turbines + Deaerator.** **DONE 2026-09-12.**
+        `Boiler.py`, `Turbine.py`, `CogenTurbine.py`, `MillTurbines.py`,
+        `CanePrepTurbines.py`, `AuxillaryTurbines.py`, `Deaerator.py` ported
+        and wired into a working "Turbines & Boiler" tab.
+      - [ ] **Phase 2b — Juice Heating.** `JuiceHeater.py` /
+        `JuiceHeatingStation.py` (needs `condensate_utils.flash_condensate`
+        too). Not started. Once this lands, Phase 2 as a whole is complete
+        and worth a PR to `main`.
 - [ ] **Phase 3 — Pan Floor.** The most structurally complex phase — 4
       selectable schemes (`FourBoilingDoubleMagma`, `ThreeBoilingDoubleMagma`,
       `ThreeBoiling`, `TwoBoiling`), each with `Pan`, `Centrifugal`,
@@ -296,3 +311,88 @@ next session doesn't have to rediscover them.
     steam -> turbines -> exhaust) — once it's done and validated, that's the
     point to open a PR to `main` for the user to actually try the app,
     per the working agreement above.
+
+- **2026-09-12** — Phase 2a complete: Boiler + Turbines + Deaerator ported
+  and wired up (Phase 2b, Juice Heating, is still open — see below). Node.js
+  v22 was available in this sandbox too; used `node -e`/`require()` against
+  the `.js` sources for cross-checking, plus a final headless-Chromium
+  `--dump-dom` pass (binary at `/opt/pw-browsers/chromium-1194/chrome-linux/
+  chrome`, same as 2026-09-11's container) against the *built* `index.html`.
+  - Ported `Boiler.py` -> `boiler.js`, `Turbine.py` -> `turbine.js`,
+    `CogenTurbine.py` -> `cogen_turbine.js` (extends `Turbine`, same as the
+    Python class), `MillTurbines.py`/`CanePrepTurbines.py`/
+    `AuxillaryTurbines.py` -> `mill_turbines.js`/`cane_prep_turbines.js`/
+    `auxillary_turbines.js` (all three are thin "solve a list of `Turbine`s"
+    wrappers, same property/method names as their Python originals), and
+    `Deaerator.py` -> `deaerator.js`. `Turbine.h_out_isentropic` calls
+    `IAPWS97.solve({P, s})` directly (not through `SteamStream`), mirroring
+    the Python source's own direct `iapws.IAPWS97(P=..., s=...)` call — this
+    is the same P/s-input path `iapws97.js` already validated in Phase 0, so
+    no changes to the steam engine itself were needed.
+  - Cross-checked against live Python (`python3 -c "..."`) for: `Boiler` at
+    default/superheated/production-scale conditions (3 cases), `Turbine`/
+    `CogenTurbine` at the classes' own `__main__` example conditions,
+    `MillTurbines`/`CanePrepTurbines`/`AuxillaryTurbines`/`Deaerator` at
+    their own `__main__` example conditions, and finally the *entire*
+    "Turbines & Boiler" tab's default-input calculation end-to-end (every
+    metric on the tab — live steam subtotal/total, exhaust available,
+    exhaust required, makeup, boiler feed water temp from the deaerator,
+    steam available from bagasse) against an equivalent hand-assembled
+    Python script using the real `MillFloor`/`Boiler`/`Deaerator`/turbine-
+    group classes with the same default inputs the tab ships with. All
+    matched to float noise (< 1e-6 relative) on every field checked.
+  - **Scope decision — Deaerator moved into this tab, "Exhaust Summary" not
+    built as its own tab yet.** In `streamlit_app.py`, the Deaerator lives on
+    a separate "Steam & Exhaust Summary" tab whose `total_exhaust_required`
+    is `exhaust_for_Pre + exhaust_for_evaporators + exhaust_for_pans +
+    exhaust_for_heaters + exhaust_for_da`, i.e. it needs Pre-Evaporator,
+    Evaporator Sets, Pan Floor, and Juice Heating — none of which are ported
+    yet (Juice Heating is Phase 2b; Pan Floor/Evaporation are Phases 3-4).
+    Building a faithful "Exhaust Summary" tab now is therefore impossible.
+    Instead: the Deaerator was folded directly into the "Turbines & Boiler"
+    tab (its own panel, since the Boiler's feedwater-temp-from-deaerator
+    coupling is real and worth keeping), and a manual "Additional exhaust
+    required (lb/hr)" input stands in for the other stages' contribution —
+    the tab still adds the Deaerator's own (correctly-computed)
+    `steam_flow_lb_hr` on top of that manual number, so `total_exhaust_
+    required` isn't just a placeholder, only the *other* consumers are.
+    **When Phase 2b/3/4 land, this manual input should be replaced** by
+    summing those stages' real exhaust demand, and the Deaerator panel
+    should probably move to a dedicated "Exhaust Summary" tab matching the
+    Python app's structure — don't forget to remove the placeholder input
+    and its explanatory `<p class="note">` text at that point.
+  - UI: added `boiler.js`/`turbine.js`/`cogen_turbine.js`/`mill_turbines.js`/
+    `cane_prep_turbines.js`/`auxillary_turbines.js`/`deaerator.js` markers to
+    `template.html` + `build.py`; flipped the `turb` tab to `enabled: true`
+    in `app.js`'s `TABS` array; added `buildTurbTab()` following the
+    established one-function-per-tab pattern. This tab needed one new UI
+    pattern the earlier two tabs didn't: **editable row lists** (one row per
+    knife/mill/auxiliary-turbine unit, since those lists vary in length —
+    e.g. `number_of_mills` from the Mill Floor tab). Added a small
+    `editableRowsTable()`/`readEditableRows()` helper pair to `app.js` for
+    this — a plain grid of `<input>` cells keyed `${id}-${rowIndex}-${col
+    Key}`, not a real spreadsheet-style editor (this app has no such
+    widget) — reusable by any future tab with the same shape of input
+    (Pan Floor's per-pan/per-centrifugal tables will likely want it too).
+    Also added `turbineGroupTable()`, a JS port of `turbine_diagram.py`'s
+    `_group_info()` adapter (one row per turbine + a TOTAL row, optional
+    HP/TFH column, `skip` list for 0-HP units left out of the display) so
+    all three turbine-group tables render with the same logic the Python
+    app's PFD table / Excel export uses.
+    The Mill Turbines row count is read from `PlantState.mill.number_of_
+    mills` at tab-build time (Mill Floor auto-solves on page load before
+    this tab builds, so it's always available) rather than being editable
+    itself — matches the Python sidebar's own list-length coupling.
+  - **Next step for a future session: Phase 2b — Juice Heating.** Read
+    `JuiceHeater.py` (`JuiceHeaterShellTube`, ~180 lines) and
+    `JuiceHeatingStation.py` (series/parallel heater trains, ~340 lines)
+    closely. `JuiceHeatingStation` also imports `condensate_utils.
+    flash_condensate` for its `clean_condensate`/`dirty_condensate`
+    properties — read that function too (it's small) and port it alongside
+    (e.g. as a `condensate_utils.js` shared module, since Pan Floor/
+    Evaporation will need condensate flashing too later). Once Juice Heating
+    is wired into its own tab (chaining off `Clarification`'s
+    `clarified_juice_stream` / `limed_juice` streams, per
+    `streamlit_app.py`'s "Juice Heating Station" + "Clarified Juice Heater"
+    subsections around line 481/521), Phase 2 as a whole is done — that's
+    the point to open a PR to `main` per the working agreement.

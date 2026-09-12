@@ -19,6 +19,13 @@ out = (template
        .replace("/*__BAGASSE_JS__*/", read("src/bagasse.js"))
        .replace("/*__MILL_FLOOR_JS__*/", read("src/mill_floor.js"))
        .replace("/*__CLARIFICATION_JS__*/", read("src/clarification.js"))
+       .replace("/*__BOILER_JS__*/", read("src/boiler.js"))
+       .replace("/*__TURBINE_JS__*/", read("src/turbine.js"))
+       .replace("/*__COGEN_TURBINE_JS__*/", read("src/cogen_turbine.js"))
+       .replace("/*__MILL_TURBINES_JS__*/", read("src/mill_turbines.js"))
+       .replace("/*__CANE_PREP_TURBINES_JS__*/", read("src/cane_prep_turbines.js"))
+       .replace("/*__AUXILLARY_TURBINES_JS__*/", read("src/auxillary_turbines.js"))
+       .replace("/*__DEAERATOR_JS__*/", read("src/deaerator.js"))
        .replace("/*__APP_JS__*/", read("src/app.js")))
 
 (WEB / "index.html").write_text(out, encoding="utf-8")

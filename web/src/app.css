@@ -142,3 +142,9 @@ tbody tr:nth-child(even) { background: var(--table-band); }
 
 .table-wrap { overflow-x: auto; }
 h3.section-title { font-size: 13px; color: var(--accent); margin: 18px 0 8px; }
+
+table.editable input { padding: 3px 5px; font-size: 12.5px; text-align: right; }
+table.editable th, table.editable td { padding: 4px 6px; }
+.checkbox-field { display: flex; align-items: center; gap: 6px; padding-top: 20px; }
+.checkbox-field input { width: auto; }
+.note { color: var(--muted); font-size: 12px; margin: 4px 0 12px; }
