@@ -126,6 +126,9 @@ web/
     cane_prep_turbines.js    <- port of CanePrepTurbines.py
     auxillary_turbines.js    <- port of AuxillaryTurbines.py
     deaerator.js             <- port of Deaerator.py
+    condensate_utils.js      <- port of condensate_utils.py
+    juice_heater.js          <- port of JuiceHeater.py (JuiceHeaterShellTube)
+    juice_heating_station.js <- port of JuiceHeatingStation.py
     app.js                <- tab shell + per-tab UI/calc logic
     app.css               <- styling (light/dark aware)
   dev/                    <- dev-only tooling, not shipped in index.html
@@ -173,20 +176,21 @@ next session doesn't have to rediscover them.
       Clarification tab sections). `MillFloor.mixed_juice_stream` feeds
       `Clarification`; `MillFloor.bagasse_stream` will later feed the Boiler.
       **DONE 2026-09-11.**
-- [ ] **Phase 2 — Juice Heating, Boiler, Turbines, Deaerator.** Port
+- [x] **Phase 2 — Juice Heating, Boiler, Turbines, Deaerator.** Port
       `JuiceHeater.py` / `JuiceHeatingStation.py`, `Boiler.py`, `Turbine.py` /
       `CogenTurbine.py`, `MillTurbines.py` / `CanePrepTurbines.py` /
       `AuxillaryTurbines.py`, `Deaerator.py`. This closes an end-to-end MVP
       loop (cane in → bagasse → boiler steam → turbines → exhaust) which is
       the "usable" milestone worth a PR to `main` for the user to try.
+      **DONE 2026-09-13.**
       - [x] **Phase 2a — Boiler + Turbines + Deaerator.** **DONE 2026-09-12.**
         `Boiler.py`, `Turbine.py`, `CogenTurbine.py`, `MillTurbines.py`,
         `CanePrepTurbines.py`, `AuxillaryTurbines.py`, `Deaerator.py` ported
         and wired into a working "Turbines & Boiler" tab.
-      - [ ] **Phase 2b — Juice Heating.** `JuiceHeater.py` /
-        `JuiceHeatingStation.py` (needs `condensate_utils.flash_condensate`
-        too). Not started. Once this lands, Phase 2 as a whole is complete
-        and worth a PR to `main`.
+      - [x] **Phase 2b — Juice Heating.** **DONE 2026-09-13.** `JuiceHeater.py`
+        -> `juice_heater.js`, `JuiceHeatingStation.py` -> `juice_heating_station.js`,
+        `condensate_utils.py` -> `condensate_utils.js`. Wired into a working
+        "Juice Heating" tab (station + standalone Clarified Juice Heater).
 - [ ] **Phase 3 — Pan Floor.** The most structurally complex phase — 4
       selectable schemes (`FourBoilingDoubleMagma`, `ThreeBoilingDoubleMagma`,
       `ThreeBoiling`, `TwoBoiling`), each with `Pan`, `Centrifugal`,
@@ -396,3 +400,77 @@ next session doesn't have to rediscover them.
     `streamlit_app.py`'s "Juice Heating Station" + "Clarified Juice Heater"
     subsections around line 481/521), Phase 2 as a whole is done — that's
     the point to open a PR to `main` per the working agreement.
+
+- **2026-09-13** — Phase 2b complete: Juice Heating ported and wired up.
+  **Phase 2 as a whole is now done** (cane in -> bagasse -> boiler steam ->
+  turbines -> exhaust, plus juice heating consuming exhaust/V1 steam) — this
+  is the "usable MVP" milestone the working agreement calls out as worth a
+  PR to `main`; opened one this session. Node.js v22 was available in this
+  sandbox (same as 2026-09-11/12's containers); used `node -e`/`require()`
+  against the `.js` sources for cross-checking, plus a final
+  headless-Chromium `--dump-dom` pass (binary at
+  `/opt/pw-browsers/chromium-1194/chrome-linux/chrome`) against the *built*
+  `index.html` to confirm the tab renders with no JS errors.
+  - Ported `condensate_utils.py` -> `condensate_utils.js` (trivial, one
+    function), `JuiceHeater.py`'s `JuiceHeaterShellTube` -> `juice_heater.js`,
+    `JuiceHeatingStation.py` -> `juice_heating_station.js`. Same
+    property/method names throughout (`cold_delta_T`, `Q_btu_per_hr`,
+    `LMTD_degF`, `steam_required_lb_per_hr`, `is_steam_hot_enough`,
+    `clean_condensate`/`dirty_condensate`, `set_steam_pressure`, etc.) per
+    the working agreement. Display/PFD/Excel export methods on the Python
+    classes were *not* ported, same precedent as every earlier phase (this
+    app has its own HTML/JS UI instead).
+  - Cross-checked against live Python (`python3 -c "..."`) for: the
+    `JuiceHeaterShellTube` `__main__` example (Clarified Juice Heater against
+    a standalone clarified-juice stream), the `JuiceHeatingStation`
+    `__main__` example (parallel + `set_steam_pressure` repressure + series),
+    and finally the *entire* Juice Heating tab's default-input calculation
+    end-to-end (Mill Floor -> Clarification -> parallel Juice Heating
+    Station with V1/Exhaust heater groups at a 75/25 split, plus the
+    standalone Clarified Juice Heater) via an equivalent hand-assembled
+    Python script chaining the real `MillFloor`/`Clarification`/
+    `JuiceHeaterShellTube`/`JuiceHeatingStation` classes with the same
+    defaults the tab ships with. All matched to float noise (< 1e-9
+    relative) on every field checked, including a series-mode case where one
+    heater's `cold_delta_T` legitimately goes to zero (secondary heater's
+    target temp equals what the primary already achieved) — this is correct
+    Python behavior, not a bug, and the JS reproduces it exactly.
+  - **UI note — mode/config toggles rebuild the whole tab.** Unlike the
+    per-tab `Calculate` button pattern used everywhere else, this tab has
+    three controls that change the *shape* of the form itself (flow
+    arrangement parallel/series changes whether a Split % column and
+    series-only exit-temp inputs appear; the fabrication exhaust psia and
+    clarified-juice-heater steam-type selects change other fields' displayed
+    defaults) — mirroring how `streamlit_app.py`'s `@st.fragment` reruns the
+    whole tab body on those same widgets' `on_change`. Rather than patching
+    the DOM in place, `buildHeatTab()` stashes the current selection in
+    `section.dataset.*` and simply calls itself again on those three
+    controls' `change` events, exactly as if Streamlit had rerun the
+    fragment. Unsaved edits in the heater row table are lost on a
+    mode/psia/steam-type change as a result — same limitation Streamlit
+    itself has (the row table resets to its mode-appropriate defaults on
+    rerun), so this is faithful to the reference app's own behavior, not a
+    regression.
+  - **UI note — extended `editableRowsTable()`/`readEditableRows()`
+    (`app.js`) with a `type: 'select'` column kind** (renders a `<select>` of
+    `c.options`, reads back the selected option string) so the heater rows'
+    "Steam Type" column can be a real dropdown (`STEAM_TYPES`) instead of a
+    free-typed string, matching `streamlit_app.py`'s
+    `SelectboxColumn(options=STEAM_TYPES)`. This is a small, generically
+    useful addition (Pan Floor's per-pan/per-centrifugal tables will likely
+    also want a steam-type or scheme dropdown column later) rather than a
+    one-off hack, so it lives in the shared helper, not duplicated per-tab.
+  - **Next step for a future session: start Phase 3 — Pan Floor.** The most
+    structurally complex remaining phase — 4 selectable schemes
+    (`FourBoilingDoubleMagma`, `ThreeBoilingDoubleMagma`, `ThreeBoiling`,
+    `TwoBoiling`), each with `Pan`, `Centrifugal`, `Crystallizer`, `Reheater`
+    and scheme-specific split-fraction inputs. Read `Pan.py`, `Centrifugal.py`,
+    `Crystallizer.py`, `Reheater.py`, and `FourBoilingDoubleMagma.py` (the
+    default scheme in both `main.py` and `streamlit_app.py`) closely first;
+    port FBDM fully end-to-end before touching the other three schemes, per
+    the Phase 3 plan note above. Pan Floor will consume the Juice Heating
+    Station's / Clarified Juice Heater's hot juice-out stream via
+    `.evaporate()` on a `SugarStream` copy to get syrup, so re-read
+    `buildHeatTab()`'s `PlantState.heat = { juice_heaters, clar_juice_heater }`
+    wiring in `app.js` before starting -- Pan Floor's syrup feed should chain
+    off of it rather than a fresh default stream.

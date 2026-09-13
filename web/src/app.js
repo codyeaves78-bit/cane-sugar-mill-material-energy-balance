@@ -5,7 +5,7 @@
     { id: 'steam', label: 'Steam Tables', enabled: true },
     { id: 'mill', label: 'Mill Floor', enabled: true },
     { id: 'clar', label: 'Clarification', enabled: true },
-    { id: 'heat', label: 'Juice Heating', enabled: false },
+    { id: 'heat', label: 'Juice Heating', enabled: true },
     { id: 'pan', label: 'Pan Floor', enabled: false },
     { id: 'evap', label: 'Evaporation', enabled: false },
     { id: 'exhaust', label: 'Exhaust Summary', enabled: false },
@@ -135,7 +135,7 @@
   // Shared plant state -- lets later tabs (Clarification, ...) chain off
   // the mill floor's mixed juice / bagasse streams once it has been solved.
   // ---------------------------------------------------------------------
-  const PlantState = { mill: null, clar: null };
+  const PlantState = { mill: null, clar: null, heat: null };
 
   function inputField(id, label, value, step) {
     return `<div><label for="${id}">${label}</label><input id="${id}" type="number" step="${step || 'any'}" value="${value}"></div>`;
@@ -164,10 +164,15 @@
 
   // Editable row tables (name/HP/efficiency lists etc.) -- a plain grid of
   // <input> cells, since this app has no spreadsheet-style data editor.
+  // A column with type: 'select' renders a <select> of c.options instead.
   function editableRowsTable(id, columns, rows) {
     const header = '<tr>' + columns.map((c) => `<th>${c.label}</th>`).join('') + '</tr>';
     const body = rows.map((row, i) => '<tr>' + columns.map((c) => {
       const inputId = `${id}-${i}-${c.key}`;
+      if (c.type === 'select') {
+        const opts = c.options.map((o) => `<option value="${o}"${o === row[c.key] ? ' selected' : ''}>${o}</option>`).join('');
+        return `<td><select id="${inputId}">${opts}</select></td>`;
+      }
       const type = c.type === 'text' ? 'text' : 'number';
       const step = c.type === 'text' ? '' : ` step="${c.step || 'any'}"`;
       return `<td><input id="${inputId}" type="${type}"${step} value="${row[c.key]}"></td>`;
@@ -181,7 +186,7 @@
       const row = {};
       columns.forEach((c) => {
         const el = section.querySelector(`#${id}-${i}-${c.key}`);
-        row[c.key] = c.type === 'text' ? el.value : parseFloat(el.value);
+        row[c.key] = (c.type === 'text' || c.type === 'select') ? el.value : parseFloat(el.value);
       });
       rows.push(row);
     }
@@ -714,11 +719,211 @@
     section.querySelector('#tb-calc').click();
   }
 
+  // ---------------------------------------------------------------------
+  // Juice Heating tab
+  //
+  // Mirrors streamlit_app.py's "Juice Heating" tab: a JuiceHeatingStation
+  // (series or parallel, chained off Clarification's limed_juice_cold_stream)
+  // plus a standalone Clarified Juice Heater fed from clarified_juice_stream.
+  // ---------------------------------------------------------------------
+  const STEAM_TYPES = ['Exhaust', 'V1', 'V2', 'V3', 'V4'];
+  const DEFAULT_V1_PSIA = 21;
+  const HEAT_COLS = [
+    { key: 'name', label: 'Group', type: 'text' },
+    { key: 'steam_type', label: 'Steam Type', type: 'select', options: STEAM_TYPES },
+    { key: 'psia', label: 'Steam Pressure (psia)', step: 1 },
+    { key: 'U', label: 'U (Btu/hr·ft²·°F)', step: 5 },
+    { key: 'area', label: 'Area (ft²)', step: 500 },
+  ];
+  const HEAT_COLS_PARALLEL = HEAT_COLS.concat([{ key: 'split_pct', label: 'Split %', step: 5 }]);
+
+  function heaterPerfRow(h) {
+    return [
+      h.name, STEAM_TYPES[h.steam_type], fmt(h.hot_stream.P, 2), fmt(h.hot_stream.T, 2),
+      fmt(h.hot_stream.h_fg, 2), fmt(h.steam_required_lb_per_hr, 2), fmt(h.U, 2),
+      fmt(h.installed_area_ft2, 2), fmt(h.required_area_ft2, 2), fmt(h.cold_stream.flow_lb_per_hr, 2),
+      fmt(h.cold_stream.temp_deg_F, 2), fmt(h.juice_out_temp_degF, 2), fmt(h.cold_stream.cp_btu_per_lb_deg_F, 2),
+      fmt(h.Q_btu_per_hr / 1e6, 2), fmt(h.LMTD_degF, 2),
+    ];
+  }
+  const HEATER_PERF_HEADERS = [
+    'Heater', 'Steam Type', 'Steam Pressure (psia)', 'Steam Temp (°F)', 'Steam hfg (BTU/lb)',
+    'Steam Flow (lb/hr)', 'U (Btu/hr·ft²·°F)', 'Area Installed (ft²)',
+    'Area Required (ft²)', 'Juice Flow In (lb/hr)', 'Juice Temp In (°F)', 'Juice Temp Out (°F)',
+    'Juice cp (Btu/lb·°F)', 'Duty (MM BTU/hr)', 'LMTD (deg F)',
+  ];
+
+  function buildHeatTab() {
+    const section = document.getElementById('tab-heat');
+    if (!PlantState.clar) {
+      section.innerHTML = '<div class="panel"><p class="error">Solve the Clarification tab first -- Juice Heating needs its limed/clarified juice streams.</p></div>';
+      return;
+    }
+
+    const clar = PlantState.clar;
+    const juice_T_out = clar.limed_juice_hot_temp_f;
+    const mode = (section.dataset.mode) || 'parallel';
+    const fabExhPsia = section.dataset.fabExhPsia ? parseFloat(section.dataset.fabExhPsia) : 30.0;
+    const cjhSteamType = section.dataset.cjhSteamType || 'Exhaust';
+
+    const heaterRows0 = [
+      { name: 'V1 Heaters', steam_type: 'V1', psia: DEFAULT_V1_PSIA, U: 200.0, area: 11000.0, split_pct: 75.0 },
+      { name: 'Exhaust Heaters', steam_type: 'Exhaust', psia: fabExhPsia, U: 200.0, area: 5000.0, split_pct: 25.0 },
+    ];
+
+    section.innerHTML = `
+      <div class="panel">
+        <h2>Juice Heating Station</h2>
+        <div class="grid">
+          <div><label>Flow arrangement</label>
+            <select id="ht-mode">
+              <option value="parallel"${mode === 'parallel' ? ' selected' : ''}>Parallel</option>
+              <option value="series"${mode === 'series' ? ' selected' : ''}>Series</option>
+            </select>
+          </div>
+          ${inputField('ht-fab_exh_psia', 'Fabrication exhaust pressure (psia)', fabExhPsia, 1)}
+        </div>
+        <p class="note">Juice from Clarification's limed juice cold stream (${fmt(clar.limed_juice_cold_stream.flow_lb_per_hr, 0)} lb/hr @ ${fmt(clar.limed_juice_cold_stream.temp_deg_F, 1)} °F).</p>
+        ${mode === 'series' ? `<div class="grid">
+          ${inputField('ht-primary_temp_out', `${heaterRows0[0].name} exit temp (°F)`, 180.0, 1)}
+          <div><label for="ht-secondary_temp_out">${heaterRows0[1].name} exit temp (°F) [locked]</label>
+            <input id="ht-secondary_temp_out" type="number" value="${juice_T_out}" disabled title="Fixed to Clarification's Limed juice hot temp input.">
+          </div>
+        </div>` : ''}
+        ${editableRowsTable('ht-heaters', mode === 'parallel' ? HEAT_COLS_PARALLEL : HEAT_COLS, heaterRows0)}
+      </div>
+
+      <div class="panel">
+        <h2>Clarified Juice Heater</h2>
+        <div class="grid">
+          <div><label>Steam type</label>
+            <select id="ht-cjh_steam_type">
+              <option value="Exhaust"${cjhSteamType === 'Exhaust' ? ' selected' : ''}>Exhaust</option>
+              <option value="V1"${cjhSteamType === 'V1' ? ' selected' : ''}>V1</option>
+            </select>
+          </div>
+          ${inputField('ht-cjh_temp', 'Juice out temp (°F)', 225.0, 1)}
+          ${inputField('ht-cjh_U', 'U (Btu/hr·ft²·°F)', 185.0, 5)}
+          ${inputField('ht-cjh_area', 'Area (ft²)', 6000.0, 500)}
+          ${inputField('ht-cjh_psia', 'Steam pressure (psia)', cjhSteamType === 'V1' ? DEFAULT_V1_PSIA : fabExhPsia, 1)}
+        </div>
+      </div>
+
+      <p><button class="primary" id="ht-calc">Calculate</button></p>
+      <div id="ht-result"></div>`;
+
+    section.querySelector('#ht-mode').addEventListener('change', (e) => {
+      section.dataset.mode = e.target.value;
+      buildHeatTab();
+    });
+    section.querySelector('#ht-fab_exh_psia').addEventListener('change', (e) => {
+      section.dataset.fabExhPsia = e.target.value;
+      buildHeatTab();
+    });
+    section.querySelector('#ht-cjh_steam_type').addEventListener('change', (e) => {
+      section.dataset.cjhSteamType = e.target.value;
+      buildHeatTab();
+    });
+
+    const resultDiv = section.querySelector('#ht-result');
+
+    section.querySelector('#ht-calc').addEventListener('click', () => {
+      try {
+        const heaterRows = readEditableRows(section, 'ht-heaters', mode === 'parallel' ? HEAT_COLS_PARALLEL : HEAT_COLS, heaterRows0.length);
+        const cjhTemp = parseFloat(section.querySelector('#ht-cjh_temp').value);
+        const cjhU = parseFloat(section.querySelector('#ht-cjh_U').value);
+        const cjhArea = parseFloat(section.querySelector('#ht-cjh_area').value);
+        const cjhPsia = parseFloat(section.querySelector('#ht-cjh_psia').value);
+        const cjhSteamTypeSel = section.querySelector('#ht-cjh_steam_type').value;
+
+        let temp_outs;
+        if (mode === 'series') {
+          const primaryTempOut = parseFloat(section.querySelector('#ht-primary_temp_out').value);
+          temp_outs = [primaryTempOut, juice_T_out];
+        } else {
+          temp_outs = heaterRows.map(() => juice_T_out);
+        }
+
+        const cold_juice = clar.limed_juice_cold_stream;
+        const heater_objs = heaterRows.map((row, i) => new JuiceHeaterShellTube({
+          cold_stream: cold_juice,
+          hot_stream: new SteamStream({ x: 1, P: row.psia }),
+          name: row.name,
+          juice_out_temp_degF: temp_outs[i],
+          U_btu_per_ft2_degF: row.U,
+          installed_area_ft2: row.area,
+          steam_type: STEAM_TYPES.indexOf(row.steam_type),
+        }));
+        const split_pcts = mode === 'parallel' ? heaterRows.map((r) => r.split_pct) : null;
+        const juice_heaters = new JuiceHeatingStation({
+          cold_stream: cold_juice, heaters: heater_objs, mode, split_pcts,
+          name: mode === 'parallel' ? 'Parallel Juice Heating Station' : 'Series Juice Heating Station',
+        });
+
+        const clar_juice_colder = SugarStream.copy(clar.clarified_juice_stream);
+        const clar_juice_heater = new JuiceHeaterShellTube({
+          cold_stream: clar_juice_colder,
+          hot_stream: new SteamStream({ x: 1, P: cjhPsia }),
+          name: 'Clarified Juice Heater',
+          juice_out_temp_degF: cjhTemp,
+          U_btu_per_ft2_degF: cjhU,
+          installed_area_ft2: cjhArea,
+          steam_type: STEAM_TYPES.indexOf(cjhSteamTypeSel),
+        });
+
+        PlantState.heat = { juice_heaters, clar_juice_heater };
+
+        const heaterPerfTable = renderTable(HEATER_PERF_HEADERS, juice_heaters.heaters.map(heaterPerfRow));
+
+        const metrics = `
+          <div class="metrics">
+            <div class="metric"><div class="metric-label">Juice out</div><div class="metric-value">${fmt(juice_heaters.juice_out.flow_lb_per_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">Exhaust</div><div class="metric-value">${fmt(juice_heaters.total_exhaust_steam_lb_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">V1</div><div class="metric-value">${fmt(juice_heaters.total_V1_steam_lb_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">V2</div><div class="metric-value">${fmt(juice_heaters.total_V2_steam_lb_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">V3</div><div class="metric-value">${fmt(juice_heaters.total_V3_steam_lb_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">V4</div><div class="metric-value">${fmt(juice_heaters.total_V4_steam_lb_hr, 0)} lb/hr</div></div>
+          </div>`;
+
+        const warnings = juice_heaters.heaters
+          .filter((h) => h.is_steam_hot_enough !== 'YES')
+          .map((h) => `<p class="error">WARNING [${h.name}]: ${h.is_steam_hot_enough}</p>`).join('');
+
+        const condensateTable = renderTable(['Item', 'lb/hr'], [
+          ['Clean condensate (Exhaust steam heaters)', fmt(juice_heaters.clean_condensate, 0)],
+          ['Dirty condensate (V1-V4 steam heaters)', fmt(juice_heaters.dirty_condensate, 0)],
+          ['Total condensate', fmt(juice_heaters.clean_condensate + juice_heaters.dirty_condensate, 0)],
+        ]);
+
+        const cjhPerfTable = renderTable(HEATER_PERF_HEADERS, [heaterPerfRow(clar_juice_heater)]);
+        const cjhMetrics = `
+          <div class="metrics">
+            <div class="metric"><div class="metric-label">Flow out</div><div class="metric-value">${fmt(clar_juice_heater.juice_out.flow_lb_per_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">Temp in</div><div class="metric-value">${fmt(clar_juice_heater.cold_stream.temp_deg_F, 1)} °F</div></div>
+            <div class="metric"><div class="metric-label">Temp out</div><div class="metric-value">${fmt(clar_juice_heater.juice_out.temp_deg_F, 1)} °F</div></div>
+            <div class="metric"><div class="metric-label">Steam required (${cjhSteamTypeSel})</div><div class="metric-value">${fmt(clar_juice_heater.steam_required_lb_per_hr, 0)} lb/hr</div></div>
+          </div>`;
+        const cjhWarning = clar_juice_heater.is_steam_hot_enough !== 'YES'
+          ? `<p class="error">WARNING [Clarified Juice Heater]: ${clar_juice_heater.is_steam_hot_enough}</p>` : '';
+
+        resultDiv.innerHTML =
+          '<h3 class="section-title">Juice Heater Performance</h3>' + heaterPerfTable + metrics + warnings +
+          '<h3 class="section-title">Condensate Return</h3>' + condensateTable +
+          '<h3 class="section-title">Clarified Juice Heater Performance</h3>' + cjhPerfTable + cjhMetrics + cjhWarning;
+      } catch (e) {
+        resultDiv.innerHTML = `<p class="error">${e.message}</p>`;
+      }
+    });
+
+    section.querySelector('#ht-calc').click();
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     buildTabs();
     buildSteamTab();
     buildMillTab();
     buildClarTab();
+    buildHeatTab();
     buildTurbTab();
   });
 })();

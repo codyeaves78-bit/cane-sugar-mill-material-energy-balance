@@ -26,6 +26,9 @@ out = (template
        .replace("/*__CANE_PREP_TURBINES_JS__*/", read("src/cane_prep_turbines.js"))
        .replace("/*__AUXILLARY_TURBINES_JS__*/", read("src/auxillary_turbines.js"))
        .replace("/*__DEAERATOR_JS__*/", read("src/deaerator.js"))
+       .replace("/*__CONDENSATE_UTILS_JS__*/", read("src/condensate_utils.js"))
+       .replace("/*__JUICE_HEATER_JS__*/", read("src/juice_heater.js"))
+       .replace("/*__JUICE_HEATING_STATION_JS__*/", read("src/juice_heating_station.js"))
        .replace("/*__APP_JS__*/", read("src/app.js")))
 
 (WEB / "index.html").write_text(out, encoding="utf-8")
