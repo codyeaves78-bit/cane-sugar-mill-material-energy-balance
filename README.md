@@ -62,5 +62,35 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 Windows users may also need Git installed first: [git-scm.com/downloads](https://git-scm.com/downloads).
 
+## HTML quick-check tool
+
+The [`html version/`](html%20version/) folder has a single self-contained HTML file
+(`cane_factory_balance.html`) that runs the same balance engine entirely client-side —
+no install, no server, just open it in a browser. It's meant for quick, offline
+sanity checks (sharing a single-file tool is easier than getting someone set up with
+Python/Streamlit), not as a replacement for the Streamlit app.
+
+The core calculation modules (Mill Floor, Clarification, Juice Heaters, Pan Floor,
+Evaporators, Deaerator, Turbines, Boiler) were validated line-by-line against the
+Python classes on matched inputs and match to floating-point precision. It's
+deliberately a lighter tool than the Streamlit app, though:
+
+- No Excel export and no process flow diagrams.
+- One evaporator train at a fixed effect count, with a single V1-split percentage —
+  no dynamic add/remove of trains and no V2–V4 vapor bleed routing across multiple
+  consumers.
+- Evaporator pressure profiles use a damped fixed-point solver instead of SciPy's
+  root-finder (SciPy can't run in a browser), so multi-train configs can drift up to
+  roughly 0.01% from the Python/Streamlit numbers; single-train configs match almost
+  exactly.
+- No separate Clarified Juice Heater station, and the juice heating station is fixed
+  at two exhaust-only heaters.
+- Pan Floor uses fixed per-scheme input fields rather than editable pan/centrifugal
+  tables, and ties each scheme's crystallizer output purity to its C pan's
+  mother-liquor purity instead of exposing it independently.
+
+For multi-train evaporation, full vapor-grade routing, Excel export, or PFDs, use the
+Streamlit app.
+
 ## Documentation
 See the [Documentation](documentation/) folder for the User Guide and worked examples.

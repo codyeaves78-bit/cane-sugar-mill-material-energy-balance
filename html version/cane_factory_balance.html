@@ -157,6 +157,7 @@
   <div>
     <h1>Cane Factory Balance</h1>
     <p class="sub">Full-plant material &amp; energy balance — mill through boiler house — running entirely client-side in one HTML file. Direct port of the Python engine, module-by-module validated against it.</p>
+    <p class="sub">Lightweight single-train quick-check tool — one evaporator train, one V1 header, no diagrams or Excel export. See the limitations note at the bottom of the page before using it for anything beyond a fast sanity check.</p>
   </div>
   <div class="tag eyebrow" style="border:1px solid var(--line);padding:7px 11px;background:var(--surface);">Steam engine: IAPWS-IF97</div>
 </div>
@@ -169,7 +170,17 @@
 <div id="tabpanels"></div>
 
 <footer>
-  Vertical-slice engine port, extended module by module. Each calculation module was checked against a live run of the original Python before being wired in here. This is a proof-of-concept UI shell — treat outputs as a starting point for review, not a substitute for the production tool, until it has been run end-to-end on real mill data.
+  <p style="margin:0 0 10px;">Vertical-slice engine port, extended module by module. Each calculation module was checked against a live run of the original Python before being wired in here — the underlying math (Mill Floor, Clarification, Juice Heaters, Pan Floor, Evaporators, Deaerator, Turbines, Boiler) matches the Python classes to floating-point precision on matched inputs. This is a lightweight single-file quick-check tool, not a port of the full <a href="https://cane-sugar-mill-material-energy-balance-fbl69dwu8opxateg3jsgnn.streamlit.app/" target="_blank" rel="noopener">Streamlit app</a> — treat outputs as a starting point for review, not a substitute for the production tool.</p>
+  <p style="margin:0 0 6px;font-weight:600;">Known gaps vs. the Streamlit app:</p>
+  <ul style="margin:0 0 10px;padding-inline-start:18px;">
+    <li>No Excel export (the Streamlit "Download" tab has no equivalent here).</li>
+    <li>No process flow diagrams (the Streamlit "Check Process Flow Diagrams" tab has no equivalent here).</li>
+    <li>Evaporation station: one evaporator train at a fixed effect count, with a single V1-split percentage — no dynamic add/remove of trains, and no V2–V4 vapor bleed distribution editor across multiple consumers (Streamlit routes each vapor grade's demand across the Pre-Evaporator and every eligible train).</li>
+    <li>Evaporator pressure-profile solves use a damped fixed-point iteration, not SciPy's root-finder (SciPy can't run in a browser) — multi-train configs can drift up to roughly 0.01% from the Python/Streamlit numbers as a result; single-train configs match almost exactly.</li>
+    <li>No separate Clarified Juice Heater station — only the combined exhaust juice heating station, fixed at two heaters, exhaust only (no V1–V4 steam-type selection or dynamic row add/remove).</li>
+    <li>Pan Floor: fixed per-scheme input fields rather than editable pan/centrifugal tables; each scheme's crystallizer output purity is tied to its C pan's mother-liquor purity instead of being an independent input; the evaporator/pan "condenser leg ΔT" is not exposed (fixed at 5°F) for evaporator sets.</li>
+  </ul>
+  <p style="margin:0;">For multi-train evaporation stations, full vapor-grade routing, Excel export, or PFDs, use the Streamlit app.</p>
 </footer>
 <script>
 // ============================================================
