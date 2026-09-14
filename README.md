@@ -39,6 +39,21 @@ pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
+### Windows (easiest: double-click launcher)
+
+If you don't want to type PowerShell commands, install [Python](https://www.python.org/downloads/)
+(check "Add python.exe to PATH" during install) and [Git for Windows](https://git-scm.com/downloads),
+then:
+
+```powershell
+git clone https://github.com/codyeaves78-bit/cane-sugar-mill-material-energy-balance
+```
+
+Open the new `cane-sugar-mill-material-energy-balance` folder and double-click
+**`run_windows.bat`**. It creates the virtual environment, installs dependencies, and
+launches the app for you — every run after the first just activates the existing venv
+and starts Streamlit. Close its window (or press Ctrl+C) to stop the app.
+
 ### Windows (PowerShell)
 
 ```powershell

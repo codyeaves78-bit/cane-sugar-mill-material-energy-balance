@@ -5,6 +5,17 @@ rem Double-click launcher for the Streamlit app on Windows.
 rem First run: creates a virtual environment and installs dependencies.
 rem Every run after that: just activates the venv and launches the app.
 
+rem Re-launch under "cmd /k" so the window can never just flash and vanish.
+rem Double-clicking a .bat normally runs it under "cmd /c", which closes the
+rem window the instant the script stops running - including if something
+rem (antivirus, a permissions issue, an unexpected crash) kills it before a
+rem PAUSE below ever gets a chance to run. /k instead drops to a prompt in
+rem the same window when the script ends, so any error stays on screen.
+if /I not "%~1"=="RELAUNCHED" (
+    cmd /k ""%~f0" RELAUNCHED"
+    exit /b
+)
+
 rem pushd (not "cd /d") so this still works when the repo lives on a UNC path
 rem (a redirected Desktop/Documents folder, e.g. \\server\share\...) - cmd.exe
 rem can't cd into a UNC path directly, but pushd maps it to a temp drive letter.
