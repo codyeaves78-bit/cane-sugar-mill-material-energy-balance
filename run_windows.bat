@@ -72,16 +72,17 @@ if not exist ".venv\Scripts\python.exe" (
     )
 )
 
-echo Installing/updating dependencies ^(this can take a minute on first run^)...
+echo Checking for updates ^(this can take a minute on first run^)...
 ".venv\Scripts\python.exe" -m pip install --upgrade pip --quiet
 ".venv\Scripts\python.exe" -m pip install -r requirements.txt
 if errorlevel 1 (
     echo.
-    echo Failed to install dependencies. Check your internet connection and the error above.
-    echo.
-    popd
-    pause
-    exit /b 1
+    choice /M "Updates cannot be performed due to no internet connection, start program anyway"
+    if errorlevel 2 (
+        popd
+        pause
+        exit /b 1
+    )
 )
 
 echo.
