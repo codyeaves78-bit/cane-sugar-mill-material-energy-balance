@@ -5,12 +5,22 @@ rem Double-click launcher for the Streamlit app on Windows.
 rem First run: creates a virtual environment and installs dependencies.
 rem Every run after that: just activates the venv and launches the app.
 
-cd /d "%~dp0"
+rem pushd (not "cd /d") so this still works when the repo lives on a UNC path
+rem (a redirected Desktop/Documents folder, e.g. \\server\share\...) - cmd.exe
+rem can't cd into a UNC path directly, but pushd maps it to a temp drive letter.
+pushd "%~dp0"
+if errorlevel 1 (
+    echo Could not open the folder this .bat file is in: %~dp0
+    echo.
+    pause
+    exit /b 1
+)
 
 if not exist "streamlit_app.py" (
     echo Could not find streamlit_app.py next to this .bat file.
     echo Make sure run_windows.bat stays in the same folder as the rest of the repo.
     echo.
+    popd
     pause
     exit /b 1
 )
@@ -33,6 +43,7 @@ if not defined PYCMD (
     echo Install it from https://www.python.org/downloads/ ^(check "Add python.exe to PATH"
     echo during install^), then double-click this file again.
     echo.
+    popd
     pause
     exit /b 1
 )
@@ -44,6 +55,7 @@ if not exist ".venv\Scripts\python.exe" (
         echo.
         echo Failed to create the virtual environment. See the error above.
         echo.
+        popd
         pause
         exit /b 1
     )
@@ -56,6 +68,7 @@ if errorlevel 1 (
     echo.
     echo Failed to install dependencies. Check your internet connection and the error above.
     echo.
+    popd
     pause
     exit /b 1
 )
@@ -68,4 +81,5 @@ echo.
 
 echo.
 echo App stopped.
+popd
 pause
