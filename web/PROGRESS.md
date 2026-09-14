@@ -114,7 +114,7 @@ web/
   PROGRESS.md            <- this file
   src/
     iapws97.js            <- steam property engine (Regions 1,2,4)
-    steam_stream.js       <- English-unit wrapper mirroring SteamStream.py
+    steam_stream.js       <- English-unit wrapper mirroring SteamStream.py (also EvaporatorSteam, same source file)
     sugar_stream.js       <- port of SugarStream.py + sugar_stream_properties.py
     bagasse.js            <- port of Bagasse.py
     mill_floor.js         <- port of MillFloor.py
@@ -129,6 +129,11 @@ web/
     condensate_utils.js      <- port of condensate_utils.py
     juice_heater.js          <- port of JuiceHeater.py (JuiceHeaterShellTube)
     juice_heating_station.js <- port of JuiceHeatingStation.py
+    massecuite.js            <- port of Massecuite.py
+    pan.js                   <- port of Pan.py
+    crystallizer_reheater.js <- port of Crystallizer_and_Reheater.py (Crystallizer + Reheater)
+    centrifugal.js           <- port of Centrifugal.py
+    four_boiling_double_magma.js <- port of FourBoilingDoubleMagma.py
     app.js                <- tab shell + per-tab UI/calc logic
     app.css               <- styling (light/dark aware)
   dev/                    <- dev-only tooling, not shipped in index.html
@@ -198,6 +203,13 @@ next session doesn't have to rediscover them.
       Port one scheme fully first (suggest FBDM, since it's the default in
       both existing entry points), get it working end to end, then add the
       other three.
+      - [x] **Phase 3a — FBDM (Four Boiling Double Magma).** **DONE 2026-09-14.**
+        `Massecuite.py`, `Pan.py`, `Crystallizer_and_Reheater.py`,
+        `Centrifugal.py`, `FourBoilingDoubleMagma.py` ported and wired into a
+        working "Pan Floor" tab (FBDM only). TBDM/3B/2B still open below.
+      - [ ] **Phase 3b — TBDM (Three Boiling Double Magma).**
+      - [ ] **Phase 3c — 3B (Three Boiling, Single Magma).**
+      - [ ] **Phase 3d — 2B (Two Boiling).**
 - [ ] **Phase 4 — Evaporation.** `PreEvaporator.py` + the `EvaporatorSet`
       family (iterative solver — check `multi_effect_solver_scipy.py` /
       `EvaporatorSetIAPWS.py` for the exact algorithm; will need a JS
@@ -474,3 +486,130 @@ next session doesn't have to rediscover them.
     `buildHeatTab()`'s `PlantState.heat = { juice_heaters, clar_juice_heater }`
     wiring in `app.js` before starting -- Pan Floor's syrup feed should chain
     off of it rather than a fresh default stream.
+
+- **2026-09-14** — Phase 3a complete: FBDM (Four Boiling Double Magma) ported
+  and wired up as the Pan Floor tab. TBDM/3B/2B (Phase 3b/c/d) are still
+  open -- see the Phase Plan checklist. `pip install -r requirements.txt`
+  needed `--default-timeout=120` this session (the default pip timeout hit a
+  slow PyPI download partway through); Node.js v22 and a headless Chromium at
+  `/opt/pw-browsers/chromium-1194/chrome-linux/chrome` were both available
+  (same container shape as recent prior sessions) -- used `node -e`/
+  `require()` against the `.js` sources for cross-checking, plus a final
+  headless-Chromium `--dump-dom` pass (needed `--no-sandbox` this time,
+  running as root in this container -- without it Chromium produced an empty
+  dump silently; add `--no-sandbox` first if a future session sees the same)
+  against the *built* `index.html`.
+  - Ported `Massecuite.py` -> `massecuite.js`, `Pan.py` -> `pan.js`,
+    `Crystallizer_and_Reheater.py` -> `crystallizer_reheater.js` (both
+    `Crystallizer` and `Reheater`, one file, matching the Python source's own
+    grouping), `Centrifugal.py` -> `centrifugal.js`,
+    `FourBoilingDoubleMagma.py` -> `four_boiling_double_magma.js`. Same
+    property/method names throughout (`massecuite_temp`, `crys_yld_frac_brix`,
+    `steam_flow_lb_hr`, `wash_water_lb_hr`, `_rebuild_pan`/`_rebuildPan`,
+    `total_raw_sugar`, etc.) per the working agreement.
+  - **`EvaporatorSteam` (defined in `SteamStream.py` alongside the full
+    `SteamStream` class) went into `steam_stream.js`**, not a new file --
+    same Python source file, and it's a tiny wrapper (`sat_temp_deg_F`/`h_fg`
+    from the fast polynomial correlations, not full IAPWS97) needed by both
+    `Massecuite`/`Pan` this session and, later, `PreEvaporator`/`EvaporatorSet`
+    in Phase 4. It needs `SugarStream._properties.{satSteamTemp,getLatentHeat}`
+    (the same fast correlations `sugar_stream.js` already exposes) --
+    **this required swapping `template.html`/`build.py`'s script-tag order so
+    `sugar_stream.js` loads before `steam_stream.js`** (previously the other
+    way around, since Phase 0 only needed `steam_stream.js` standalone).
+    Confirmed nothing else depends on the old order (`sugar_stream.js` has no
+    reference back to `SteamStream`/`IAPWS97`) before swapping -- worth
+    knowing if a future session is confused about why this order looks
+    reversed from Phase 0's original layout.
+  - **`Massecuite`'s BPR regression** (`_slope_poly`/`_b_poly` in the Python
+    source, built once at import via `np.polyfit(x, y, 1)` twice) is ported as
+    a small `linearFit(xs, ys)` analytic least-squares helper in
+    `massecuite.js` rather than hardcoding the resulting coefficients --
+    keeps the port auditable against the regression math in the Python
+    source rather than against opaque transcribed numbers. Matched Python's
+    `np.polyfit` output to float noise in cross-checks.
+  - **`functools.cached_property`** (Python's `_surface_solve`/`_head_solve`
+    iterative solves, each run once and cached) has no direct JS equivalent,
+    so `massecuite.js` manually memoizes via a `this._surfaceSolveCache`/
+    `this._headSolveCache` instance field, checked/set inside a plain method
+    (`_surfaceSolve()`/`_headSolve()`) rather than a getter -- the public
+    getters (`water_bp_surface`, `massecuite_temp`, etc.) call the method and
+    index into the cached `[T, water_bp]` pair. Behaviorally identical to
+    Python's caching since nothing in this app mutates a `Massecuite` in place
+    after solving (fresh instances are built each iteration/solve via `.copy()`
+    or `new Massecuite(...)`, matching the Python source's own usage pattern).
+  - Cross-checked against live Python (`python3 -c "..."`) at multiple levels:
+    `Massecuite` (4 cases spanning boiling mode, set-temperature mode, and a
+    low-purity extrapolated-BPR case), `Pan` (the class's own `__main__`
+    example, including the "update `calandria_pressure_psia` after
+    construction, U recalculates" live-recompute behavior), `Crystallizer`/
+    `Reheater`/`Centrifugal` (their own `__main__` examples, both the A-grade
+    wash-water case and the C-grade low-purity no-wash case), and finally the
+    *entire* `FourBoilingDoubleMagma` class against its own `__main__`
+    example (full 15-iteration solve, 5 pans + 4 centrifugals + crystallizer/
+    reheater chained together) -- syrup-as-fed recycle convergence, every
+    pan's massecuite flow, the crystallizer/reheater duties, both raw sugar
+    streams, final molasses, steam/condensate totals, and every internal
+    magma/remelt stream all matched to float noise (<1e-6 relative, one value
+    differed at the 10th significant digit -- ordinary floating-point noise
+    from a different but equivalent operation order, not a bug).
+  - **Pan Floor tab (FBDM only)** added to `app.js` as `buildPanTab()`,
+    following the established one-function-per-tab pattern. Needed one
+    genuinely new UI element beyond what `editableRowsTable()` already
+    supported (it already had a `type: 'select'` column, added in Phase 2b)
+    -- nothing new there, reused as-is for the pan rows' Steam Type dropdown.
+    Chains off Clarification the same way Juice Heating does: a `resolveCj()`
+    helper mirrors `streamlit_app.py`'s own `resolve_cj()` function exactly
+    (post-Juice-Heating `clar_juice_heater.juice_out` if `PlantState.heat` has
+    ever solved, else straight from `PlantState.clar.clarified_juice_stream`),
+    then builds the syrup feed the same way the Python tab does: scale flow
+    by `cj.brix / syrup_brix` at a fixed target brix (65 default) -- this is
+    *not* a real evaporator solve (Phase 4 isn't built yet), it's the same
+    placeholder concentration-only step the reference Streamlit app itself
+    uses until Evaporation exists, so it's not a shortcut invented for this
+    port.
+  - Ported the Python app's full "Pan Floor Output Table" (`four_boiling_rows()`
+    in `pan_floor_streamlit_table.py`) as a set of small row-builder helpers
+    in `app.js` (`pfStreamRow`/`pfWaterRow`/`pfVaporRow`/`pfMasseRow`/
+    `pfPanRows`/`pfCenRows`/etc., composed by `fourBoilingRows()`) rather than
+    a generic reusable module, since the row shapes are scheme-specific and
+    TBDM/3B/2B aren't ported yet -- when those land, extract the common
+    helpers (`pfStreamRow` etc. are already scheme-agnostic) rather than
+    duplicating them per scheme, matching how the Python source itself shares
+    `stream_row`/`water_row`/etc. across all four scheme-specific row
+    functions in `pan_floor_streamlit_table.py`. Also ported
+    `massecuite_summary_table()` and `steam_consumption_table()` from the same
+    Python file as `panFloorMasseSummaryTable()`/`panFloorSteamTable()`.
+  - **Not ported this session (deliberately out of scope):** `Condenser.py`
+    (needed for `FourBoilingDoubleMagma.pan_condensers` -- the Pan Floor tab
+    skips the vapor condenser table the Python app shows, since Condenser
+    isn't ported yet; add it as its own small module when Phase 5's Cooling
+    Tower work needs it anyway) and all `to_excel`/`generate_pfd`/
+    `neat_display` display methods (same precedent as every earlier phase --
+    this app has its own HTML/JS UI instead).
+  - Full validation: `python web/build.py` succeeds; headless-Chromium
+    `--dump-dom` against the built `index.html` shows every tab (Steam,
+    Mill Floor, Clarification, Juice Heating, Pan Floor, Turbines & Boiler)
+    rendering with zero `<p class="error">` elements and no JS console errors,
+    and the Pan Floor tab's default-input auto-solve produces sane metrics
+    (~351,268 lb/hr syrup in -> ~192,409 lb/hr raw sugar, ~55,982 lb/hr
+    exhaust + ~168,084 lb/hr V1 steam demand at the default 19,000 TPD/6-mill
+    inputs carried through from Mill Floor). Did not touch `iapws97.js` this
+    session, so the Phase 0 steam-engine validation harness did not need
+    re-running (per PROGRESS.md's own rule -- only re-run it after an
+    `iapws97.js` change).
+  - **Next step for a future session: Phase 3b — TBDM (Three Boiling Double
+    Magma).** Read `ThreeBoilingDoubleMagma.py` closely (it reuses `Pan`,
+    `Centrifugal`, `Crystallizer`, `Reheater` as-is -- no new domain classes
+    needed, just a different station topology and split-fraction set, plus a
+    molasses "top-off" recycle feature FBDM doesn't have). The Pan Floor tab
+    will need a scheme selector (radio/select) that swaps which pan-floor
+    class gets built and which default pan/centrifugal rows show, mirroring
+    `streamlit_app.py`'s `st.radio("Boiling scheme", ...)` -- `buildPanTab()`
+    doesn't have this yet since only FBDM exists; follow `buildHeatTab()`'s
+    `section.dataset.*` + "rebuild the whole tab on change" pattern (already
+    used for Juice Heating's mode toggle) rather than trying to patch the DOM
+    in place. `three_boiling_rows()` in `pan_floor_streamlit_table.py` is the
+    reference for that scheme's own stream table; the shared `pfStreamRow`/
+    `pfWaterRow`/`pfMasseRow`/etc. helpers added this session should be reused
+    as-is, only the row-composition function is scheme-specific.

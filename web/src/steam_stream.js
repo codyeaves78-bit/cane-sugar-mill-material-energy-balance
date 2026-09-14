@@ -8,6 +8,8 @@
   'use strict';
 
   const IAPWS97 = (typeof module !== 'undefined' && module.exports) ? require('./iapws97.js') : root.IAPWS97;
+  const SugarStream = (typeof module !== 'undefined' && module.exports) ? require('./sugar_stream.js') : root.SugarStream;
+  const { satSteamTemp, getLatentHeat } = SugarStream._properties;
 
   const MPA_PER_PSIA = 0.00689476;
   const KJKG_PER_BTULB = 2.326;
@@ -75,9 +77,30 @@
     }
   }
 
+  // A simpler steam stream class specifically for evaporator/pan trial-and-error
+  // calculations, built for speed (fast polynomial correlations, not full
+  // IAPWS97) -- mirrors Python's EvaporatorSteam, also defined in SteamStream.py.
+  // Only valid for 1-60 psia, same range as the sugar_stream_properties.py
+  // correlations it wraps.
+  class EvaporatorSteam {
+    constructor(P_psia = 14.7, flow_lb_per_hr = 0) {
+      this.P_psia = P_psia;
+      this.flow_lb_per_hr = flow_lb_per_hr;
+    }
+
+    get sat_temp_deg_F() { return satSteamTemp(this.P_psia); }
+    get h_fg() { return getLatentHeat(this.P_psia); }
+
+    properties() {
+      return { P_psia: this.P_psia, flow_lb_per_hr: this.flow_lb_per_hr, sat_temp_deg_F: this.sat_temp_deg_F, h_fg: this.h_fg };
+    }
+  }
+
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = SteamStream;
+    module.exports.EvaporatorSteam = EvaporatorSteam;
   } else {
     root.SteamStream = SteamStream;
+    root.EvaporatorSteam = EvaporatorSteam;
   }
 })(typeof window !== 'undefined' ? window : globalThis);

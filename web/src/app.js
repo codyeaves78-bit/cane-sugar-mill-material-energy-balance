@@ -6,7 +6,7 @@
     { id: 'mill', label: 'Mill Floor', enabled: true },
     { id: 'clar', label: 'Clarification', enabled: true },
     { id: 'heat', label: 'Juice Heating', enabled: true },
-    { id: 'pan', label: 'Pan Floor', enabled: false },
+    { id: 'pan', label: 'Pan Floor', enabled: true },
     { id: 'evap', label: 'Evaporation', enabled: false },
     { id: 'exhaust', label: 'Exhaust Summary', enabled: false },
     { id: 'turb', label: 'Turbines & Boiler', enabled: true },
@@ -135,7 +135,7 @@
   // Shared plant state -- lets later tabs (Clarification, ...) chain off
   // the mill floor's mixed juice / bagasse streams once it has been solved.
   // ---------------------------------------------------------------------
-  const PlantState = { mill: null, clar: null, heat: null };
+  const PlantState = { mill: null, clar: null, heat: null, pan: null };
 
   function inputField(id, label, value, step) {
     return `<div><label for="${id}">${label}</label><input id="${id}" type="number" step="${step || 'any'}" value="${value}"></div>`;
@@ -918,12 +918,448 @@
     section.querySelector('#ht-calc').click();
   }
 
+  // ---------------------------------------------------------------------
+  // Pan Floor tab -- Four Boiling Double Magma (FBDM) scheme only for now
+  // (see web/PROGRESS.md Phase 3). Mirrors streamlit_app.py's Pan Floor tab
+  // with the boiling-scheme radio fixed to FBDM; TBDM/3B/2B are future work.
+  // ---------------------------------------------------------------------
+
+  // resolve_cj() equivalent: clarified juice post juice-heating if that stage
+  // has ever solved, otherwise straight from Clarification.
+  function resolveCj() {
+    return PlantState.heat ? PlantState.heat.clar_juice_heater.juice_out : PlantState.clar.clarified_juice_stream;
+  }
+
+  function pfGrade(name, suffix) {
+    return name.endsWith(suffix) ? name.slice(0, name.length - suffix.length).trim() : name;
+  }
+
+  function pfScaled(stream, pct) {
+    const out = SugarStream.copy(stream);
+    out.flow_lb_per_hr = stream.flow_lb_per_hr * pct / 100;
+    return out;
+  }
+
+  function combineStreams(streams) {
+    streams = streams.filter((s) => s.flow_lb_per_hr > 0);
+    if (!streams.length) return new SugarStream({ brix: 0, purity: 0, flow_lb_per_hr: 0, temp_deg_F: 0 });
+    const total_flow = streams.reduce((s, x) => s + x.flow_lb_per_hr, 0);
+    const total_solids = streams.reduce((s, x) => s + x.solids_flow, 0);
+    const total_pol = streams.reduce((s, x) => s + x.pol_flow, 0);
+    const combined = SugarStream.copy(streams[0]);
+    combined.flow_lb_per_hr = total_flow;
+    combined.brix = total_solids / total_flow * 100;
+    combined.purity = total_solids ? total_pol / total_solids * 100 : 0;
+    combined.temp_deg_F = streams.reduce((s, x) => s + x.flow_lb_per_hr * x.temp_deg_F, 0) / total_flow;
+    return combined;
+  }
+
+  function pfStreamRow(section, name, tag, s) {
+    return [section, name, tag, fmt(s.flow_lb_per_hr, 0), s.pol ? fmt(s.pol, 2) : '-', fmt(s.brix, 2),
+      fmt(s.purity, 2), fmt(s.pol_flow, 0), fmt(s.solids_flow, 0), fmt(s.cu_ft_hr, 1),
+      fmt(s.specific_gravity, 3), fmt(s.temp_deg_F, 1), '-'];
+  }
+
+  function pfWaterRow(section, name, tag, flow_lb_hr, temp_deg_F = null) {
+    return [section, name, tag, fmt(flow_lb_hr, 0), '-', fmt(0, 2), '-', fmt(0, 0), fmt(0, 0),
+      fmt(flow_lb_hr ? flow_lb_hr / 62.4 : 0, 1), fmt(1.0, 3),
+      temp_deg_F === null ? '-' : fmt(temp_deg_F, 1), '-'];
+  }
+
+  function pfVaporRow(section, name, tag, flow_lb_hr, temp_deg_F = null) {
+    return [section, name, tag, fmt(flow_lb_hr, 0), '-', fmt(0, 2), '-', fmt(0, 0), fmt(0, 0),
+      '-', '-', temp_deg_F === null ? '-' : fmt(temp_deg_F, 1), '-'];
+  }
+
+  function pfMasseRow(section, name, tag, masse, flow_lb_hr) {
+    return [section, name, tag, fmt(flow_lb_hr, 0), fmt(masse.masse_purity * masse.masse_brix / 100, 2),
+      fmt(masse.masse_brix, 2), fmt(masse.masse_purity, 2),
+      fmt(flow_lb_hr * masse.masse_purity * masse.masse_brix / 10000, 0),
+      fmt(flow_lb_hr * masse.masse_brix / 100, 0), fmt(flow_lb_hr / masse.density, 1),
+      fmt(masse.density / 62.4, 3), fmt(masse.massecuite_temp, 1), fmt(masse.crystal_content, 1)];
+  }
+
+  function pfPanRows(section, pan, feedNames) {
+    const grade = pfGrade(pan.name, 'Pans');
+    const rows = pan.feed_streams.map((f, i) => pfStreamRow(section, feedNames[i] || `Feed ${i + 1}`, 'Entering', f));
+    rows.push(pfMasseRow(section, `${grade} Massecuite`, 'Leaving', pan.massecuite, pan.massecuite_flow_lb_hr));
+    rows.push(pfVaporRow(section, 'Vapors', 'Leaving', pan.water_evaporated_lb_hr, pan.massecuite.water_bp_surface));
+    return rows;
+  }
+
+  function pfCenRows(section, cen) {
+    const grade = pfGrade(cen.name, 'Centrifugals');
+    return [
+      pfMasseRow(section, `${grade} Massecuite`, 'Entering', cen.massecuite, cen.massecuite_flow_lb_hr),
+      pfWaterRow(section, 'Wash Water', 'Entering', cen.wash_water_lb_hr),
+      pfStreamRow(section, `${grade} Sugar`, 'Leaving', cen.sugar_stream),
+      pfStreamRow(section, `${grade} Molasses`, 'Leaving', cen.molasses_stream),
+    ];
+  }
+
+  function pfDilRows(section, undiluted, diluted, label) {
+    const water = diluted.flow_lb_per_hr - undiluted.flow_lb_per_hr;
+    return [
+      pfStreamRow(section, `${label} (undiluted)`, 'Entering', undiluted),
+      pfWaterRow(section, 'Dilution Water', 'Entering', water),
+      pfStreamRow(section, `${label} (diluted)`, 'Leaving', diluted),
+    ];
+  }
+
+  function pfMagmaRows(section, sugar, magma, label) {
+    const water = magma.flow_lb_per_hr - sugar.flow_lb_per_hr;
+    return [
+      pfStreamRow(section, `${label} Sugar`, 'Entering', sugar),
+      pfWaterRow(section, 'Mingler Water', 'Entering', water),
+      pfStreamRow(section, `${label} Magma`, 'Leaving', magma),
+    ];
+  }
+
+  function pfMagmaSplitRows(section, destinations) {
+    return destinations.map(([label, s]) => pfStreamRow(section, label, 'Internal', s));
+  }
+
+  function pfRemeltRows(section, magmaToRmlt, remelt, label) {
+    const water = remelt.flow_lb_per_hr - magmaToRmlt.flow_lb_per_hr;
+    return [
+      pfStreamRow(section, `${label} Magma (to Remelt)`, 'Entering', magmaToRmlt),
+      pfWaterRow(section, 'Remelt Water', 'Entering', water),
+      pfStreamRow(section, `${label} Remelt`, 'Leaving', remelt),
+    ];
+  }
+
+  function pfHeatxRows(section, unit) {
+    return [
+      pfMasseRow(section, 'Massecuite Entering', 'Entering', unit.massecuite_in, unit.massecuite_flow_lb_hr),
+      pfMasseRow(section, 'Massecuite Leaving', 'Leaving', unit.massecuite_out, unit.massecuite_flow_lb_hr),
+    ];
+  }
+
+  function pfOverallRows(fb, sugarRows) {
+    const section = 'Overall';
+    const finalMolasses = fb.C_centrifugals.molasses_stream;
+    const pans = fb._pans;
+    const totalVapor = pans.reduce((s, p) => s + p.water_evaporated_lb_hr, 0);
+    const vaporTemp = totalVapor
+      ? pans.reduce((s, p) => s + p.water_evaporated_lb_hr * p.massecuite.water_bp_surface, 0) / totalVapor
+      : 0;
+    const rows = [pfStreamRow(section, 'Syrup From Evaporators', 'Entering', fb.syrup)];
+    rows.push(pfWaterRow(section, 'Total Water', 'Entering', fb.total_water.flow_lb_per_hr));
+    sugarRows.forEach(([label, s]) => rows.push(pfStreamRow(section, label, 'Leaving', s)));
+    rows.push(pfStreamRow(section, 'Final Molasses', 'Leaving', finalMolasses));
+    rows.push(pfWaterRow(section, 'Vapors', 'Leaving', totalVapor, vaporTemp));
+    return rows;
+  }
+
+  function fourBoilingRows(fb) {
+    const a1_sugar = fb.A1_centrifugals.sugar_stream;
+    const a2_sugar = fb.A2_centrifugals.sugar_stream;
+    const combined_remelt = combineStreams([fb._b_remelt, fb._c_remelt]);
+    const combined_magma_to_rmlt = combineStreams([fb._b_magma_to_rmlt, fb._c_magma_to_rmlt]);
+
+    let rows = pfOverallRows(fb, [['A1 Sugar', a1_sugar], ['A2 Sugar', a2_sugar]]);
+    rows = rows.concat(pfRemeltRows('Remelt Station', combined_magma_to_rmlt, combined_remelt, 'B+C'));
+
+    rows.push(pfStreamRow('Syrup Tanks', 'Syrup From Evaporators', 'Entering', fb.syrup));
+    rows.push(pfStreamRow('Syrup Tanks', 'Remelt', 'Entering', combined_remelt));
+    rows.push(pfStreamRow('Syrup Tanks', 'Syrup Remelt Blend', 'Leaving', fb.syrup_as_fed));
+
+    rows.push(pfStreamRow('Syrup Distribution', 'Syrup to A1 Pans', 'Internal', pfScaled(fb.syrup_as_fed, fb.syrup_to_A1_pans_pct)));
+    rows.push(pfStreamRow('Syrup Distribution', 'Syrup to A2 Pans', 'Internal', pfScaled(fb.syrup_as_fed, fb.syrup_to_A2_pans_pct)));
+    rows.push(pfStreamRow('Syrup Distribution', 'Syrup to Grain Pans', 'Internal', pfScaled(fb.syrup_as_fed, fb.syrup_to_grain_pct)));
+
+    rows = rows.concat(pfPanRows('A1 Station - Pans', fb.A1_pans, ['Syrup', 'B Magma A1 Footing']));
+    rows = rows.concat(pfCenRows('A1 Station - Centrifugals', fb.A1_centrifugals));
+    rows = rows.concat(pfDilRows('A1 Station - A1 Molasses Dilution', fb.A1_centrifugals.molasses_stream, fb._a1_mol_diluted, 'A1 Molasses'));
+    rows.push(pfStreamRow('A1 Station - A1 Molasses Distribution', 'A1 Molasses to A2', 'Internal', pfScaled(fb._a1_mol_diluted, fb.a1_mol_to_A2_pct)));
+    rows.push(pfStreamRow('A1 Station - A1 Molasses Distribution', 'A1 Molasses to Grain', 'Internal', pfScaled(fb._a1_mol_diluted, fb.a1_mol_to_grain_pct)));
+    rows.push(pfStreamRow('A1 Station - A1 Molasses Distribution', 'A1 Molasses to B', 'Internal', pfScaled(fb._a1_mol_diluted, fb.a1_mol_to_B_pct)));
+
+    rows = rows.concat(pfPanRows('A2 Station - Pans', fb.A2_pans, ['Syrup', 'A1 Molasses', 'B Magma A2 Footing']));
+    rows = rows.concat(pfCenRows('A2 Station - Centrifugals', fb.A2_centrifugals));
+    rows = rows.concat(pfDilRows('A2 Station - A2 Molasses Dilution', fb.A2_centrifugals.molasses_stream, fb._a2_mol_diluted, 'A2 Molasses'));
+    rows.push(pfStreamRow('A2 Station - A2 Molasses Distribution', 'A2 Molasses to Grain', 'Internal', pfScaled(fb._a2_mol_diluted, fb.a2_mol_to_grain_pct)));
+    rows.push(pfStreamRow('A2 Station - A2 Molasses Distribution', 'A2 Molasses to B', 'Internal', pfScaled(fb._a2_mol_diluted, fb.a2_mol_to_B_pct)));
+
+    rows = rows.concat(pfPanRows('B Station - Pans', fb.B_pans, ['A2 Molasses to B', 'C Magma B Footing', 'A1 Molasses to B']));
+    rows = rows.concat(pfCenRows('B Station - Centrifugals', fb.B_centrifugals));
+    rows = rows.concat(pfMagmaRows('B Station - B Mingler', fb.B_centrifugals.sugar_stream, fb._b_magma, 'B'));
+    rows = rows.concat(pfMagmaSplitRows('B Station - B Magma Distribution', [
+      ['B Magma to A1 Footing', fb._b_magma_A1_footing],
+      ['B Magma to A2 Footing', fb._b_magma_A2_footing],
+      ['B Magma to Remelt', fb._b_magma_to_rmlt],
+    ]));
+    rows = rows.concat(pfDilRows('B Station - Molasses Dilution', fb.B_centrifugals.molasses_stream, fb._b_mol_diluted, 'B Molasses'));
+    rows.push(pfStreamRow('B Station - B Molasses Distribution', 'B Molasses to Grain', 'Internal', pfScaled(fb._b_mol_diluted, fb.b_mol_to_grain_pct)));
+    rows.push(pfStreamRow('B Station - B Molasses Distribution', 'B Molasses to C Pans', 'Internal', pfScaled(fb._b_mol_diluted, fb.b_mol_to_C_pct)));
+
+    rows = rows.concat(pfPanRows('Grain Pans', fb.grain_pans, ['Syrup', 'A1 Molasses', 'A2 Molasses', 'B Molasses']));
+
+    rows = rows.concat(pfPanRows('C Station - Pans', fb.C_pans, ['Grain Massecuite', 'B Molasses']));
+    rows = rows.concat(pfHeatxRows('C Station - Crystallizers', fb.C_crystallizers));
+    rows = rows.concat(pfHeatxRows('C Station - Reheater', fb.C_reheaters));
+    rows = rows.concat(pfCenRows('C Station - Centrifugals', fb.C_centrifugals));
+    rows = rows.concat(pfMagmaRows('C Station - C Mingler', fb.C_centrifugals.sugar_stream, fb._c_magma, 'C'));
+    rows = rows.concat(pfMagmaSplitRows('C Station - C Magma Distribution', [
+      ['C Magma to B Footing', fb._c_magma_B_footing],
+      ['C Magma to Remelt', fb._c_magma_to_rmlt],
+    ]));
+    return rows;
+  }
+
+  const PAN_FLOOR_COLUMNS = ['Section', 'Stream', 'Entering/Leaving/Internal', 'Flow lb/hr', 'Pol %', 'Brix %',
+    'Purity', 'Pol lb/hr', 'Brix lb/hr', 'Cu Ft/hr', 'Specific Gravity', 'Temperature', 'Crystal Content'];
+
+  function panFloorMasseSummaryTable(fb, caneTpd) {
+    const grades = fb._pans.map((p) => pfGrade(p.name, 'Pans'));
+    const ft3hr = fb._pans.map((p) => p.massecuite_flow_lb_hr / p.massecuite.density);
+    const totalFt3Hr = ft3hr.reduce((a, b) => a + b, 0);
+    const allFt3Hr = ft3hr.concat([totalFt3Hr]);
+    const headers = ['Metric'].concat(grades.map((g) => `${g} Massecuite`), 'Total');
+    const rows = [
+      ['Cubic Ft / Hr'].concat(allFt3Hr.map((v) => fmt(v, 2))),
+      ['Cubic Ft / Day'].concat(allFt3Hr.map((v) => fmt(v * 24, 2))),
+      ['Cubic Ft / Ton Cane'].concat(allFt3Hr.map((v) => fmt(caneTpd ? v * 24 / caneTpd : 0, 2))),
+    ];
+    return renderTable(headers, rows);
+  }
+
+  function panFloorSteamTable(fb) {
+    const headers = ['Metric'].concat(fb._pans.map((p) => p.name));
+    const metrics = [
+      ['Steam Used (lb/hr)', (p) => fmt(p.steam_flow_lb_hr, 2)],
+      ['Steam Type', (p) => STEAM_TYPES[p.steam_type]],
+      ['Steam Pressure (psia)', (p) => fmt(p.calandria_pressure_psia, 2)],
+      ['Steam Temp (F)', (p) => fmt(p.calandria_T_sat_F, 2)],
+      ['Steam hfg (BTU/lb)', (p) => fmt(p.h_fg_calandria, 2)],
+      ['Massecuite Temp (F)', (p) => fmt(p.massecuite.massecuite_temp, 2)],
+      ['Vapor Evaporated (lb/hr)', (p) => fmt(p.water_evaporated_lb_hr, 2)],
+      ['Vapor Temp (F)', (p) => fmt(p.massecuite.water_bp_surface, 2)],
+      ['Vapor Pressure (psia)', (p) => fmt(p.massecuite.vapor_pressure_psia, 2)],
+      ['Vapor hfg (BTU/lb)', (p) => fmt(p.h_fg_vapor, 2)],
+      ['Heating Surface (ft2)', (p) => fmt(p.heating_surface_ft2, 2)],
+      ['U (Btu/hr.ft2.F)', (p) => fmt(p.U_btu_hr_ft2_F, 2)],
+    ];
+    const rows = metrics.map(([label, fn]) => [label].concat(fb._pans.map(fn)));
+    return renderTable(headers, rows);
+  }
+
+  const PAN_COLS = [
+    { key: 'grade', label: 'Grade', type: 'text' },
+    { key: 'area', label: 'Heating Surface (ft²)', step: 100 },
+    { key: 'vacuum', label: 'Vacuum (in Hg)', step: 0.5 },
+    { key: 'ss', label: 'Supersaturation', step: 0.05 },
+    { key: 'head', label: 'Head (ft)', step: 0.5 },
+    { key: 'masse_brix', label: 'Masse Brix', step: 0.5 },
+    { key: 'ml_purity', label: 'Mother Liquor Purity', step: 1 },
+    { key: 'calandria_psia', label: 'Calandria (psia)', step: 0.5 },
+    { key: 'heat_loss', label: 'Heat Loss Factor', step: 0.01 },
+    { key: 'steam_type', label: 'Steam Type', type: 'select', options: STEAM_TYPES },
+  ];
+  const CEN_COLS = [
+    { key: 'grade', label: 'Grade', type: 'text' },
+    { key: 'mol_brix_out', label: 'Molasses Brix Out', step: 1 },
+    { key: 'purity_rise', label: 'Purity Rise', step: 0.5 },
+    { key: 'sugar_purity', label: 'Sugar Purity', step: 0.1 },
+    { key: 'sugar_moisture', label: 'Sugar Moisture', step: 0.1 },
+    { key: 'sugar_temp', label: 'Sugar Temp', step: 1 },
+    { key: 'molasses_temp', label: 'Molasses Temp', step: 1 },
+  ];
+  const FBDM_PAN_DEFAULTS = [
+    { grade: 'A1', area: 16000, vacuum: 23.5, ss: 1.2, head: 2, masse_brix: 92, ml_purity: 75, calandria_psia: 21.696, heat_loss: 0.02, steam_type: 'V1' },
+    { grade: 'A2', area: 6000, vacuum: 23.5, ss: 1.2, head: 2, masse_brix: 92, ml_purity: 70, calandria_psia: 21.696, heat_loss: 0.02, steam_type: 'V1' },
+    { grade: 'B', area: 7500, vacuum: 25.0, ss: 1.2, head: 2, masse_brix: 94, ml_purity: 52, calandria_psia: 29.696, heat_loss: 0.05, steam_type: 'Exhaust' },
+    { grade: 'Grain', area: 3000, vacuum: 25.5, ss: 1.2, head: 2, masse_brix: 88, ml_purity: 45, calandria_psia: 29.696, heat_loss: 0.05, steam_type: 'Exhaust' },
+    { grade: 'C', area: 12000, vacuum: 26.5, ss: 1.2, head: 2, masse_brix: 95.5, ml_purity: 33, calandria_psia: 21.696, heat_loss: 0.05, steam_type: 'V1' },
+  ];
+  const FBDM_CEN_DEFAULTS = [
+    { grade: 'A1', mol_brix_out: 80.0, purity_rise: 0.0, sugar_purity: 99.7, sugar_moisture: 0.2, sugar_temp: 150, molasses_temp: 145 },
+    { grade: 'A2', mol_brix_out: 80.0, purity_rise: 0.0, sugar_purity: 99.3, sugar_moisture: 0.2, sugar_temp: 150, molasses_temp: 145 },
+    { grade: 'B', mol_brix_out: 82.0, purity_rise: 0.0, sugar_purity: 92.0, sugar_moisture: 5.0, sugar_temp: 150, molasses_temp: 145 },
+    { grade: 'C', mol_brix_out: 82.0, purity_rise: 0.0, sugar_purity: 82.0, sugar_moisture: 5.0, sugar_temp: 150, molasses_temp: 145 },
+  ];
+
+  function buildPanTab() {
+    const section = document.getElementById('tab-pan');
+    if (!PlantState.clar) {
+      section.innerHTML = '<div class="panel"><p class="error">Solve the Clarification tab first -- Pan Floor needs its clarified juice stream.</p></div>';
+      return;
+    }
+
+    section.innerHTML = `
+      <div class="panel">
+        <h2>Pan Floor -- Four Boiling Double Magma</h2>
+        <p class="note">Only the FBDM scheme is implemented so far -- see web/PROGRESS.md Phase 3.</p>
+        <div class="grid">
+          ${inputField('pf-syrup_brix', 'Syrup brix', 65.0, 0.5)}
+          ${inputField('pf-inj_water', 'Injection water temp (°F)', 90.0, 1)}
+          ${inputField('pf-cond_leg', 'Condenser leg ΔT (°F)', 5.0, 0.5)}
+          ${inputField('pf-b_magma_brix', 'B magma brix', 92.0, 0.5)}
+          ${inputField('pf-b_remelt_brix', 'B remelt brix', 65.0, 0.5)}
+          ${inputField('pf-c_magma_brix', 'C magma brix', 92.0, 0.5)}
+          ${inputField('pf-c_remelt_brix', 'C remelt brix', 65.0, 0.5)}
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3 class="section-title">Pans</h3>
+        ${editableRowsTable('pf-pans', PAN_COLS, FBDM_PAN_DEFAULTS)}
+        <h3 class="section-title">Centrifugals</h3>
+        ${editableRowsTable('pf-cens', CEN_COLS, FBDM_CEN_DEFAULTS)}
+      </div>
+
+      <div class="panel">
+        <h3 class="section-title">C Crystallizer / Reheater (low-grade cooling train)</h3>
+        <div class="grid">
+          ${inputField('pf-cryst_temp_out', 'Crystallizer masse out (°F)', 120.0, 1)}
+          ${inputField('pf-cryst_ml_purity_out', 'Crystallizer mother liquor purity out (%)', 30.0, 1)}
+          ${inputField('pf-reheat_temp_out', 'Reheater masse out (°F)', 140.0, 1)}
+        </div>
+        <p class="note">Cooling water fixed 85→105°F, reheat water fixed 150→135°F.</p>
+      </div>
+
+      <div class="panel">
+        <h3 class="section-title">Split fractions</h3>
+        <div class="grid">
+          ${inputField('pf-syrup_to_A1', 'Syrup to A1 pans (%)', 75.0, 1)}
+          ${inputField('pf-syrup_to_A2', 'Syrup to A2 pans (%)', 20.0, 1)}
+          ${inputField('pf-a1_to_A2', 'A1 mol to A2 (%)', 80.0, 1)}
+          ${inputField('pf-a1_to_grain', 'A1 mol to grain (%)', 3.0, 1)}
+          ${inputField('pf-a2_to_grain', 'A2 mol to grain (%)', 0.0, 1)}
+          ${inputField('pf-b_to_grain', 'B mol to grain (%)', 10.0, 1)}
+          ${inputField('pf-b_A1_footing', 'B magma A1 footing (%)', 40.0, 1)}
+          ${inputField('pf-b_A2_footing', 'B magma A2 footing (%)', 40.0, 1)}
+          ${inputField('pf-c_B_footing', 'C magma B footing (%)', 80.0, 1)}
+        </div>
+      </div>
+
+      <p><button class="primary" id="pf-calc">Calculate</button></p>
+      <div id="pf-result"></div>`;
+
+    const resultDiv = section.querySelector('#pf-result');
+
+    section.querySelector('#pf-calc').addEventListener('click', () => {
+      try {
+        const cj = resolveCj();
+        const syrup_brix = parseFloat(section.querySelector('#pf-syrup_brix').value);
+        const syrup = SugarStream.copy(cj);
+        syrup.flow_lb_per_hr = cj.flow_lb_per_hr * cj.brix / syrup_brix;
+        syrup.brix = syrup_brix;
+
+        const panRows = readEditableRows(section, 'pf-pans', PAN_COLS, FBDM_PAN_DEFAULTS.length);
+        const pans = {};
+        panRows.forEach((row) => {
+          pans[row.grade] = new Pan({
+            feed_streams: null,
+            heating_surface_ft2: row.area,
+            inches_vacuum: row.vacuum,
+            supersaturation: row.ss,
+            head_ft: row.head,
+            masse_brix: row.masse_brix,
+            ml_purity: row.ml_purity,
+            calandria_pressure_psia: row.calandria_psia,
+            heat_loss_factor: row.heat_loss,
+            steam_type: STEAM_TYPES.indexOf(row.steam_type),
+            name: `${row.grade} Pans`,
+          });
+        });
+
+        const cenRows = readEditableRows(section, 'pf-cens', CEN_COLS, FBDM_CEN_DEFAULTS.length);
+        const cens = {};
+        cenRows.forEach((row) => {
+          cens[row.grade] = new Centrifugal({
+            massecuite: null,
+            massecuite_flow_lb_hr: 0,
+            target_molasses_brix: row.mol_brix_out,
+            purity_rise: row.purity_rise,
+            sugar_purity: row.sugar_purity,
+            sugar_moisture: row.sugar_moisture,
+            sugar_temp: row.sugar_temp,
+            molasses_temp: row.molasses_temp,
+            name: `${row.grade} Centrifugals`,
+          });
+        });
+
+        const cCrystallizers = new Crystallizer({
+          massecuite_in: null, massecuite_flow_lb_hr: 0,
+          masse_temp_out_deg_F: parseFloat(section.querySelector('#pf-cryst_temp_out').value),
+          ml_purity_out: parseFloat(section.querySelector('#pf-cryst_ml_purity_out').value),
+          water_temp_in_deg_F: 85, water_temp_out_deg_F: 105, name: 'C Crystallizers',
+        });
+        const cReheaters = new Reheater({
+          massecuite_in: null, massecuite_flow_lb_hr: 0,
+          masse_temp_out_deg_F: parseFloat(section.querySelector('#pf-reheat_temp_out').value),
+          water_temp_in_deg_F: 150, water_temp_out_deg_F: 135, name: 'C Reheaters',
+        });
+
+        const panFloor = new FourBoilingDoubleMagma({
+          syrup,
+          A1_pans: pans.A1, A2_pans: pans.A2, B_pans: pans.B, C_pans: pans.C, grain_pans: pans.Grain,
+          A1_centrifugals: cens.A1, A2_centrifugals: cens.A2, B_centrifugals: cens.B, C_centrifugals: cens.C,
+          C_crystallizers: cCrystallizers, C_reheaters: cReheaters,
+          syrup_to_A1_pans_pct: parseFloat(section.querySelector('#pf-syrup_to_A1').value),
+          syrup_to_A2_pans_pct: parseFloat(section.querySelector('#pf-syrup_to_A2').value),
+          a1_mol_to_A2_pct: parseFloat(section.querySelector('#pf-a1_to_A2').value),
+          a1_mol_to_grain_pct: parseFloat(section.querySelector('#pf-a1_to_grain').value),
+          a2_mol_to_grain_pct: parseFloat(section.querySelector('#pf-a2_to_grain').value),
+          b_mol_to_grain_pct: parseFloat(section.querySelector('#pf-b_to_grain').value),
+          b_magma_A1_footing_pct: parseFloat(section.querySelector('#pf-b_A1_footing').value),
+          b_magma_A2_footing_pct: parseFloat(section.querySelector('#pf-b_A2_footing').value),
+          c_magma_B_footing_pct: parseFloat(section.querySelector('#pf-c_B_footing').value),
+          b_magma_brix: parseFloat(section.querySelector('#pf-b_magma_brix').value),
+          c_magma_brix: parseFloat(section.querySelector('#pf-c_magma_brix').value),
+          b_remelt_brix: parseFloat(section.querySelector('#pf-b_remelt_brix').value),
+          c_remelt_brix: parseFloat(section.querySelector('#pf-c_remelt_brix').value),
+          injection_water_temp_F: parseFloat(section.querySelector('#pf-inj_water').value),
+          condenser_leg_temp_drop_F: parseFloat(section.querySelector('#pf-cond_leg').value),
+          iterations: 20,
+        });
+
+        PlantState.pan = panFloor;
+
+        const rawSugar = panFloor.total_raw_sugar;
+        const finalMolasses = panFloor.C_centrifugals.molasses_stream;
+
+        const metrics = `
+          <div class="metrics">
+            <div class="metric"><div class="metric-label">Entering syrup</div><div class="metric-value">${fmt(panFloor.syrup.flow_lb_per_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">Total raw sugar</div><div class="metric-value">${fmt(rawSugar.flow_lb_per_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">Total final molasses</div><div class="metric-value">${fmt(finalMolasses.flow_lb_per_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">Exhaust steam</div><div class="metric-value">${fmt(panFloor.total_exhaust_steam_lb_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">V1 steam</div><div class="metric-value">${fmt(panFloor.total_V1_steam_lb_hr, 0)} lb/hr</div></div>
+          </div>`;
+
+        const condensateTable = renderTable(['Item', 'lb/hr'], [
+          ['Clean condensate (Exhaust steam pans)', fmt(panFloor.clean_condensate, 0)],
+          ['Dirty condensate (V1-V4 steam pans)', fmt(panFloor.dirty_condensate, 0)],
+          ['Total condensate', fmt(panFloor.clean_condensate + panFloor.dirty_condensate, 0)],
+        ]);
+
+        const caneTpd = PlantState.mill ? PlantState.mill.cane_tpd : 0;
+        const masseTable = panFloorMasseSummaryTable(panFloor, caneTpd);
+        const steamTable = panFloorSteamTable(panFloor);
+        const streamTable = renderTable(PAN_FLOOR_COLUMNS, fourBoilingRows(panFloor));
+
+        resultDiv.innerHTML = metrics +
+          '<h3 class="section-title">Massecuite Summary</h3>' + masseTable +
+          '<h3 class="section-title">Steam Consumption</h3>' + steamTable +
+          '<h3 class="section-title">Condensate Return</h3>' + condensateTable +
+          '<h3 class="section-title">Pan Floor Output Table</h3>' + streamTable;
+      } catch (e) {
+        resultDiv.innerHTML = `<p class="error">${e.message}</p>`;
+      }
+    });
+
+    section.querySelector('#pf-calc').click();
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     buildTabs();
     buildSteamTab();
     buildMillTab();
     buildClarTab();
     buildHeatTab();
+    buildPanTab();
     buildTurbTab();
   });
 })();

@@ -644,92 +644,6 @@ table.editable th, table.editable td { padding: 4px 6px; }
 
 </script>
 <script>
-// English-unit wrapper around IAPWS97, mirroring Python's SteamStream class
-// (SteamStream.py) property-for-property so the rest of the JS port reads
-// exactly like the Python domain classes it's replacing.
-//
-// Pass any 2 of {T (F), P (psia), h (BTU/lb), s (BTU/lb-R), x (0-1)}.
-
-(function (root) {
-  'use strict';
-
-  const IAPWS97 = (typeof module !== 'undefined' && module.exports) ? require('./iapws97.js') : root.IAPWS97;
-
-  const MPA_PER_PSIA = 0.00689476;
-  const KJKG_PER_BTULB = 2.326;
-  const KJKGK_PER_BTULBR = 4.1868;
-  const M3KG_PER_FT3LB = 1 / 16.0185; // ft3/lb -> m3/kg
-
-  const fToK = (f) => (f - 32) * 5 / 9 + 273.15;
-  const kToF = (k) => (k - 273.15) * 9 / 5 + 32;
-  const psiaToMpa = (p) => p * MPA_PER_PSIA;
-  const mpaToPsia = (p) => p / MPA_PER_PSIA;
-  const btuLbToKjKg = (h) => h * KJKG_PER_BTULB;
-  const kjKgToBtuLb = (h) => h / KJKG_PER_BTULB;
-  const btuLbRToKjKgK = (s) => s * KJKGK_PER_BTULBR;
-  const kjKgKToBtuLbR = (s) => s / KJKGK_PER_BTULBR;
-  const m3KgToFt3Lb = (v) => v / M3KG_PER_FT3LB;
-
-  class SteamStream {
-    constructor({ T, P, h, s, x, flow_lb_per_hr = 0 } = {}) {
-      this.flow_lb_per_hr = flow_lb_per_hr;
-      this._definingParams = { T, P, h, s, x };
-      this._state = SteamStream._buildState({ T, P, h, s, x });
-    }
-
-    static _buildState({ T, P, h, s, x }) {
-      const kwargs = {};
-      if (T !== undefined) kwargs.T = fToK(T);
-      if (P !== undefined) kwargs.P = psiaToMpa(P);
-      if (h !== undefined) kwargs.h = btuLbToKjKg(h);
-      if (s !== undefined) kwargs.s = btuLbRToKjKgK(s);
-      if (x !== undefined) kwargs.x = x;
-      return IAPWS97.solve(kwargs);
-    }
-
-    update({ T, P, h, s, x } = {}) {
-      this._state = SteamStream._buildState({ T, P, h, s, x });
-    }
-
-    get T() { return kToF(this._state.T); }
-    get P() { return mpaToPsia(this._state.P); }
-    get h() { return kjKgToBtuLb(this._state.h); }
-    get s() { return kjKgKToBtuLbR(this._state.s); }
-    get x() { return this._state.x; }
-    get v() { return m3KgToFt3Lb(this._state.v); }
-    get rho() { return 1 / this.v; }
-
-    get h_fg() {
-      const satLiq = IAPWS97.solve({ P: this._state.P, x: 0 });
-      const satVap = IAPWS97.solve({ P: this._state.P, x: 1 });
-      return kjKgToBtuLb(satVap.h - satLiq.h);
-    }
-
-    get is_superheated() {
-      const satVap = IAPWS97.solve({ P: this._state.P, x: 1 });
-      const satTempF = kToF(satVap.T);
-      return this.T > satTempF + 0.01;
-    }
-
-    properties() {
-      return {
-        flow_lb_per_hr: this.flow_lb_per_hr,
-        T: this.T, P: this.P, h: this.h, s: this.s, x: this.x,
-        v: this.v, rho: this.rho, h_fg: this.h_fg,
-        is_superheated: this.is_superheated,
-      };
-    }
-  }
-
-  if (typeof module !== 'undefined' && module.exports) {
-    module.exports = SteamStream;
-  } else {
-    root.SteamStream = SteamStream;
-  }
-})(typeof window !== 'undefined' ? window : globalThis);
-
-</script>
-<script>
 // Port of SugarStream.py + sugar_stream_properties.py. A generic sugar
 // solution stream (brix/purity/flow/temp/pressure/level) used throughout the
 // mill balance (mixed juice, clarified juice, syrup, massecuite, etc). Fast
@@ -901,6 +815,115 @@ table.editable th, table.editable td { padding: 4px 6px; }
     module.exports = SugarStream;
   } else {
     root.SugarStream = SugarStream;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// English-unit wrapper around IAPWS97, mirroring Python's SteamStream class
+// (SteamStream.py) property-for-property so the rest of the JS port reads
+// exactly like the Python domain classes it's replacing.
+//
+// Pass any 2 of {T (F), P (psia), h (BTU/lb), s (BTU/lb-R), x (0-1)}.
+
+(function (root) {
+  'use strict';
+
+  const IAPWS97 = (typeof module !== 'undefined' && module.exports) ? require('./iapws97.js') : root.IAPWS97;
+  const SugarStream = (typeof module !== 'undefined' && module.exports) ? require('./sugar_stream.js') : root.SugarStream;
+  const { satSteamTemp, getLatentHeat } = SugarStream._properties;
+
+  const MPA_PER_PSIA = 0.00689476;
+  const KJKG_PER_BTULB = 2.326;
+  const KJKGK_PER_BTULBR = 4.1868;
+  const M3KG_PER_FT3LB = 1 / 16.0185; // ft3/lb -> m3/kg
+
+  const fToK = (f) => (f - 32) * 5 / 9 + 273.15;
+  const kToF = (k) => (k - 273.15) * 9 / 5 + 32;
+  const psiaToMpa = (p) => p * MPA_PER_PSIA;
+  const mpaToPsia = (p) => p / MPA_PER_PSIA;
+  const btuLbToKjKg = (h) => h * KJKG_PER_BTULB;
+  const kjKgToBtuLb = (h) => h / KJKG_PER_BTULB;
+  const btuLbRToKjKgK = (s) => s * KJKGK_PER_BTULBR;
+  const kjKgKToBtuLbR = (s) => s / KJKGK_PER_BTULBR;
+  const m3KgToFt3Lb = (v) => v / M3KG_PER_FT3LB;
+
+  class SteamStream {
+    constructor({ T, P, h, s, x, flow_lb_per_hr = 0 } = {}) {
+      this.flow_lb_per_hr = flow_lb_per_hr;
+      this._definingParams = { T, P, h, s, x };
+      this._state = SteamStream._buildState({ T, P, h, s, x });
+    }
+
+    static _buildState({ T, P, h, s, x }) {
+      const kwargs = {};
+      if (T !== undefined) kwargs.T = fToK(T);
+      if (P !== undefined) kwargs.P = psiaToMpa(P);
+      if (h !== undefined) kwargs.h = btuLbToKjKg(h);
+      if (s !== undefined) kwargs.s = btuLbRToKjKgK(s);
+      if (x !== undefined) kwargs.x = x;
+      return IAPWS97.solve(kwargs);
+    }
+
+    update({ T, P, h, s, x } = {}) {
+      this._state = SteamStream._buildState({ T, P, h, s, x });
+    }
+
+    get T() { return kToF(this._state.T); }
+    get P() { return mpaToPsia(this._state.P); }
+    get h() { return kjKgToBtuLb(this._state.h); }
+    get s() { return kjKgKToBtuLbR(this._state.s); }
+    get x() { return this._state.x; }
+    get v() { return m3KgToFt3Lb(this._state.v); }
+    get rho() { return 1 / this.v; }
+
+    get h_fg() {
+      const satLiq = IAPWS97.solve({ P: this._state.P, x: 0 });
+      const satVap = IAPWS97.solve({ P: this._state.P, x: 1 });
+      return kjKgToBtuLb(satVap.h - satLiq.h);
+    }
+
+    get is_superheated() {
+      const satVap = IAPWS97.solve({ P: this._state.P, x: 1 });
+      const satTempF = kToF(satVap.T);
+      return this.T > satTempF + 0.01;
+    }
+
+    properties() {
+      return {
+        flow_lb_per_hr: this.flow_lb_per_hr,
+        T: this.T, P: this.P, h: this.h, s: this.s, x: this.x,
+        v: this.v, rho: this.rho, h_fg: this.h_fg,
+        is_superheated: this.is_superheated,
+      };
+    }
+  }
+
+  // A simpler steam stream class specifically for evaporator/pan trial-and-error
+  // calculations, built for speed (fast polynomial correlations, not full
+  // IAPWS97) -- mirrors Python's EvaporatorSteam, also defined in SteamStream.py.
+  // Only valid for 1-60 psia, same range as the sugar_stream_properties.py
+  // correlations it wraps.
+  class EvaporatorSteam {
+    constructor(P_psia = 14.7, flow_lb_per_hr = 0) {
+      this.P_psia = P_psia;
+      this.flow_lb_per_hr = flow_lb_per_hr;
+    }
+
+    get sat_temp_deg_F() { return satSteamTemp(this.P_psia); }
+    get h_fg() { return getLatentHeat(this.P_psia); }
+
+    properties() {
+      return { P_psia: this.P_psia, flow_lb_per_hr: this.flow_lb_per_hr, sat_temp_deg_F: this.sat_temp_deg_F, h_fg: this.h_fg };
+    }
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = SteamStream;
+    module.exports.EvaporatorSteam = EvaporatorSteam;
+  } else {
+    root.SteamStream = SteamStream;
+    root.EvaporatorSteam = EvaporatorSteam;
   }
 })(typeof window !== 'undefined' ? window : globalThis);
 
@@ -2205,6 +2228,1207 @@ table.editable th, table.editable td { padding: 4px 6px; }
 
 </script>
 <script>
+// Port of Massecuite.py — massecuite state in a vacuum pan (or off-boiling in
+// a crystallizer/reheater/transport). BPR regression sourced from Birkett fig
+// 12.14 in his Nicholl's Class Notes (deg F). Valid range: ml_purity 30-100,
+// below 60 is extrapolated.
+
+(function (root) {
+  'use strict';
+
+  const SugarStream = (typeof module !== 'undefined' && module.exports) ? require('./sugar_stream.js') : root.SugarStream;
+  const { satSteamTemp, getCp, specificGravity } = SugarStream._properties;
+
+  // --- BPR regression, built once at module load (mirrors the Python
+  // module-level _build_bpr_regression() call) ---
+  const _PURITIES = [100, 90, 80, 70, 60];
+  const _Y1 = [9.9, 11, 12.5, 14.1, 16.3];   // BPR (F) at T = 130F
+  const _Y2 = [14.6, 16, 18, 20.3, 22.8];    // BPR (F) at T = 185F
+  const _T1 = 130, _T2 = 185;
+
+  // np.polyfit(x, y, 1) — least-squares line, returned as [slope, intercept].
+  function linearFit(xs, ys) {
+    const n = xs.length;
+    let sx = 0, sy = 0, sxx = 0, sxy = 0;
+    for (let i = 0; i < n; i++) {
+      sx += xs[i]; sy += ys[i]; sxx += xs[i] * xs[i]; sxy += xs[i] * ys[i];
+    }
+    const slope = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+    const intercept = (sy - slope * sx) / n;
+    return [slope, intercept];
+  }
+
+  function _buildBprRegression() {
+    const slopes = [], bs = [];
+    for (let i = 0; i < _PURITIES.length; i++) {
+      const m = (_Y2[i] - _Y1[i]) / (_T2 - _T1);
+      slopes.push(m);
+      bs.push(_Y2[i] - m * _T2);
+    }
+    return [linearFit(_PURITIES, slopes), linearFit(_PURITIES, bs)];
+  }
+
+  const [_slopeCoef, _bCoef] = _buildBprRegression();
+  const _slopePoly = (purity) => _slopeCoef[0] * purity + _slopeCoef[1];
+  const _bPoly = (purity) => _bCoef[0] * purity + _bCoef[1];
+
+  const PURITY_MIN = 20;
+  const PURITY_MAX = 100;
+
+  class Massecuite {
+    constructor({ ml_purity, masse_purity, masse_brix, inches_vacuum,
+                  supersaturation = null, head_ft = null,
+                  flow_lb_hr = null, temp_F = null } = {}) {
+      if (!(ml_purity >= PURITY_MIN && ml_purity <= PURITY_MAX)) {
+        throw new Error(`Mother liquor purity ${ml_purity} is outside the supported range (${PURITY_MIN}-${PURITY_MAX}).`);
+      }
+      if (masse_purity < ml_purity) {
+        throw new Error(`Massecuite purity (${masse_purity}) cannot be less than mother liquor purity (${ml_purity}).`);
+      }
+      const ssGiven = supersaturation !== null && supersaturation !== undefined;
+      const tempGiven = temp_F !== null && temp_F !== undefined;
+      if (ssGiven === tempGiven) {
+        throw new Error('Give exactly one of supersaturation (boiling mode) or temp_F (set-temperature mode).');
+      }
+      if (ssGiven && (head_ft === null || head_ft === undefined)) {
+        throw new Error('head_ft is required in boiling (supersaturation) mode.');
+      }
+      this.ml_purity = ml_purity;
+      this.masse_purity = masse_purity;
+      this.masse_brix = masse_brix;
+      this.inches_vacuum = inches_vacuum;
+      this.supersaturation = ssGiven ? supersaturation : null;
+      this.head_ft = head_ft;
+      this.flow_lb_hr = flow_lb_hr;
+      this.temp_F = tempGiven ? temp_F : null;
+
+      this._surfaceSolveCache = null;
+      this._headSolveCache = null;
+    }
+
+    copy(changes = {}) {
+      const params = {
+        ml_purity: this.ml_purity,
+        masse_purity: this.masse_purity,
+        masse_brix: this.masse_brix,
+        inches_vacuum: this.inches_vacuum,
+        supersaturation: this.supersaturation,
+        head_ft: this.head_ft,
+        flow_lb_hr: this.flow_lb_hr,
+        temp_F: this.temp_F,
+      };
+      if (changes.temp_F !== undefined && changes.temp_F !== null) {
+        params.supersaturation = null;
+      }
+      if (changes.supersaturation !== undefined && changes.supersaturation !== null) {
+        params.temp_F = null;
+      }
+      Object.assign(params, changes);
+      return new Massecuite(params);
+    }
+
+    // ------------------------------------------------------------------
+    // Private helpers (temperature-parameterized, used during iteration)
+    // ------------------------------------------------------------------
+
+    _densityAt() {
+      return specificGravity(this.masse_brix) * 62.4;
+    }
+
+    _requireBoiling() {
+      if (this.temp_F !== null) {
+        throw new Error(
+          'This property needs the boiling solve, but this massecuite was built with an ' +
+          'explicit temp_F (set-temperature mode) -- BPR-based supersaturation is only ' +
+          'meaningful at boiling equilibrium. Use copy({supersaturation: ...}) if it is back in a pan.'
+        );
+      }
+    }
+
+    _satBprAt(temp_F) {
+      return _slopePoly(this.ml_purity) * temp_F + _bPoly(this.ml_purity);
+    }
+
+    // ------------------------------------------------------------------
+    // Vapor space pressure
+    // ------------------------------------------------------------------
+
+    get vapor_pressure_psia() {
+      return 14.696 - this.inches_vacuum * 0.491154;
+    }
+
+    // ------------------------------------------------------------------
+    // Cached solves (run once, memoized like Python's functools.cached_property)
+    // ------------------------------------------------------------------
+
+    _surfaceSolve() {
+      if (this._surfaceSolveCache) return this._surfaceSolveCache;
+      this._requireBoiling();
+      const water_bp = satSteamTemp(this.vapor_pressure_psia);
+      let T = water_bp + 20;
+      for (let i = 0; i < 100; i++) {
+        const T_new = water_bp + this.supersaturation * this._satBprAt(T);
+        if (Math.abs(T_new - T) < 1e-6) {
+          this._surfaceSolveCache = [T_new, water_bp];
+          return this._surfaceSolveCache;
+        }
+        T = T_new;
+      }
+      throw new Error('Massecuite surface solve did not converge');
+    }
+
+    _headSolve() {
+      if (this._headSolveCache) return this._headSolveCache;
+      this._requireBoiling();
+      const P_vapor = this.vapor_pressure_psia;
+      let T = satSteamTemp(P_vapor) + 20;
+      for (let i = 0; i < 100; i++) {
+        const delta_P = this._densityAt() * this.head_ft / 144;
+        const water_bp_head = satSteamTemp(P_vapor + delta_P);
+        const T_new = water_bp_head + this.supersaturation * this._satBprAt(T);
+        if (Math.abs(T_new - T) < 1e-6) {
+          this._headSolveCache = [T_new, water_bp_head];
+          return this._headSolveCache;
+        }
+        T = T_new;
+      }
+      throw new Error('Massecuite head solve did not converge');
+    }
+
+    // ------------------------------------------------------------------
+    // Surface condition (head = 0)
+    // ------------------------------------------------------------------
+
+    get water_bp_surface() { return this._surfaceSolve()[1]; }
+    get massecuite_temp_surface() { return this._surfaceSolve()[0]; }
+    get bpr_at_surface() { return this.massecuite_temp_surface - this.water_bp_surface; }
+
+    // ------------------------------------------------------------------
+    // Head condition (at specified depth)
+    // ------------------------------------------------------------------
+
+    get water_bp_at_head() { return this._headSolve()[1]; }
+
+    get massecuite_temp() {
+      if (this.temp_F !== null) return this.temp_F;
+      return this._headSolve()[0];
+    }
+
+    get bpr_at_head() { return this.massecuite_temp - this.water_bp_at_head; }
+
+    // ------------------------------------------------------------------
+    // Physical properties at the converged head temperature
+    // ------------------------------------------------------------------
+
+    get density() { return this._densityAt(); }
+
+    get saturation_bpr() { return this._satBprAt(this.massecuite_temp); }
+
+    get specific_heat() { return getCp(this.masse_brix); }
+
+    // ------------------------------------------------------------------
+    // Composition
+    // ------------------------------------------------------------------
+
+    get crystal_content() {
+      return this.masse_brix * (this.masse_purity - this.ml_purity) / (100 - this.ml_purity);
+    }
+
+    get mother_liquor_brix() {
+      return 100 - 100 * (100 - this.masse_brix) / (100 - this.crystal_content);
+    }
+
+    get crystal_yield_pct_brix() {
+      return (this.masse_purity - this.ml_purity) / (100 - this.ml_purity) * 100;
+    }
+
+    // ------------------------------------------------------------------
+    // Flow-based properties (require flow_lb_hr to be set)
+    // ------------------------------------------------------------------
+
+    _checkFlow() {
+      if (this.flow_lb_hr === null || this.flow_lb_hr === undefined) {
+        throw new Error('flow_lb_hr is not set -- pass it to the constructor or assign it directly.');
+      }
+    }
+
+    get solids_flow() {
+      this._checkFlow();
+      return this.masse_brix / 100 * this.flow_lb_hr;
+    }
+
+    get pol_flow() {
+      this._checkFlow();
+      return this.masse_purity * this.masse_brix / 10000 * this.flow_lb_hr;
+    }
+
+    get cu_ft_hr() {
+      return this.flow_lb_hr / this.density;
+    }
+
+    // ------------------------------------------------------------------
+    // Display
+    // ------------------------------------------------------------------
+
+    properties() {
+      const d = {
+        ml_purity: this.ml_purity,
+        masse_purity: this.masse_purity,
+        masse_brix: this.masse_brix,
+        crystal_content_pct: this.crystal_content,
+        mother_liquor_brix: this.mother_liquor_brix,
+        crystal_yield_pct_brix_pct: this.crystal_yield_pct_brix,
+        density_lb_ft3: this.density,
+        massecuite_temp: this.massecuite_temp,
+        sat_bpr: this.saturation_bpr,
+      };
+      if (this.temp_F === null) {
+        Object.assign(d, {
+          inches_vacuum: this.inches_vacuum,
+          vapor_pressure_psia: this.vapor_pressure_psia,
+          supersaturation: this.supersaturation,
+          head_ft: this.head_ft,
+          water_bp_surface: this.water_bp_surface,
+          massecuite_temp_surf: this.massecuite_temp_surface,
+          bpr_at_surface: this.bpr_at_surface,
+          water_bp_at_head: this.water_bp_at_head,
+          bpr_at_head: this.bpr_at_head,
+        });
+      }
+      if (this.flow_lb_hr !== null && this.flow_lb_hr !== undefined) {
+        d.flow_lb_hr = this.flow_lb_hr;
+        d.solids_flow = this.solids_flow;
+        d.pol_flow = this.pol_flow;
+      }
+      return d;
+    }
+  }
+
+  Massecuite._properties = { linearFit, _slopePoly, _bPoly };
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = Massecuite;
+  } else {
+    root.Massecuite = Massecuite;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// Port of Pan.py — vacuum pan complete material and energy balance.
+// Massecuite purity is derived from the feed stream pol/solids balance (not
+// specified directly). Mother liquor purity (ml_purity) is a direct user
+// input; crystal yield is derived from ml_purity and masse_purity.
+
+(function (root) {
+  'use strict';
+
+  const SugarStream = (typeof module !== 'undefined' && module.exports) ? require('./sugar_stream.js') : root.SugarStream;
+  const Massecuite = (typeof module !== 'undefined' && module.exports) ? require('./massecuite.js') : root.Massecuite;
+  const EvaporatorSteam = (typeof module !== 'undefined' && module.exports) ? require('./steam_stream.js').EvaporatorSteam : root.EvaporatorSteam;
+
+  class Pan {
+    constructor({ feed_streams = null, heating_surface_ft2, inches_vacuum, supersaturation,
+                  head_ft, masse_brix, ml_purity, calandria_pressure_psia = 21.696,
+                  heat_loss_factor = 0.0, name = 'Pan', steam_type = 0 } = {}) {
+      if (feed_streams === null || feed_streams === undefined) {
+        this.feed_streams = [new SugarStream({ brix: 65, purity: 88, flow_lb_per_hr: 100, temp_deg_F: 140 })];
+      } else {
+        this.feed_streams = Array.isArray(feed_streams) ? feed_streams : [feed_streams];
+      }
+      this.heating_surface_ft2 = heating_surface_ft2;
+      this.inches_vacuum = inches_vacuum;
+      this.supersaturation = supersaturation;
+      this.head_ft = head_ft;
+      this.masse_brix = masse_brix;
+      this.ml_purity = ml_purity;
+      this.crys_yld_frac_brix = (this.masse_purity - ml_purity) / (100 - ml_purity);
+      this.calandria_pressure_psia = calandria_pressure_psia;
+      this.heat_loss_factor = heat_loss_factor;
+      this.name = name;
+      this.steam_type = steam_type; // 0 = Exh, 1 = V1, 2 = V2, 3 = V3, 4 = V4
+
+      this.massecuite = new Massecuite({
+        ml_purity: this.ml_purity,
+        masse_purity: this.masse_purity,
+        masse_brix: masse_brix,
+        inches_vacuum: inches_vacuum,
+        supersaturation: supersaturation,
+        head_ft: head_ft,
+      });
+    }
+
+    // ------------------------------------------------------------------
+    // Calandria steam (computed live from calandria_pressure_psia)
+    // ------------------------------------------------------------------
+
+    get _calandria_steam() {
+      return new EvaporatorSteam(this.calandria_pressure_psia);
+    }
+
+    get calandria_T_sat_F() { return this._calandria_steam.sat_temp_deg_F; }
+    get h_fg_calandria() { return this._calandria_steam.h_fg; }
+
+    // ------------------------------------------------------------------
+    // Feed-side helpers
+    // ------------------------------------------------------------------
+
+    static _cpSugar(brix) {
+      return 1.0 - 0.006 * brix;
+    }
+
+    get feed_flow_lb_hr() {
+      return this.feed_streams.reduce((s, f) => s + f.flow_lb_per_hr, 0);
+    }
+
+    get feed_solids_lb_hr() {
+      return this.feed_streams.reduce((s, f) => s + f.flow_lb_per_hr * f.brix / 100, 0);
+    }
+
+    get feed_temp_F() {
+      return this.feed_streams.reduce((s, f) => s + f.flow_lb_per_hr * f.temp_deg_F, 0) / this.feed_flow_lb_hr;
+    }
+
+    get masse_purity() {
+      const total_pol = this.feed_streams.reduce((s, f) => s + f.flow_lb_per_hr * f.purity * f.brix / 10000, 0);
+      const total_solids = this.feed_solids_lb_hr;
+      return total_pol / total_solids * 100;
+    }
+
+    get cp_massecuite() { return Pan._cpSugar(this.masse_brix); }
+
+    // ------------------------------------------------------------------
+    // Material balance
+    // ------------------------------------------------------------------
+
+    get massecuite_flow_lb_hr() {
+      return this.feed_solids_lb_hr / (this.masse_brix / 100);
+    }
+
+    get water_evaporated_lb_hr() {
+      return this.feed_flow_lb_hr - this.massecuite_flow_lb_hr;
+    }
+
+    // ------------------------------------------------------------------
+    // Energy balance (h_fg here is at vapor-space pressure, not calandria)
+    // ------------------------------------------------------------------
+
+    get h_fg_vapor() {
+      return new EvaporatorSteam(this.massecuite.vapor_pressure_psia).h_fg;
+    }
+
+    get heat_sensible_btu_hr() {
+      return this.feed_flow_lb_hr * this.cp_massecuite * (this.massecuite.massecuite_temp - this.feed_temp_F);
+    }
+
+    get heat_evaporation_btu_hr() {
+      return this.water_evaporated_lb_hr * this.h_fg_vapor;
+    }
+
+    get heat_loss_btu_hr() {
+      return (this.heat_sensible_btu_hr + this.heat_evaporation_btu_hr) * this.heat_loss_factor;
+    }
+
+    get heat_transfer_btu_hr() {
+      return this.heat_sensible_btu_hr + this.heat_evaporation_btu_hr + this.heat_loss_btu_hr;
+    }
+
+    // ------------------------------------------------------------------
+    // Steam consumption (h_fg here is the calandria-side standard value)
+    // ------------------------------------------------------------------
+
+    get steam_flow_lb_hr() {
+      return this.heat_transfer_btu_hr / this.h_fg_calandria;
+    }
+
+    get steam_to_evaporation_ratio() {
+      return this.steam_flow_lb_hr / this.water_evaporated_lb_hr;
+    }
+
+    // ------------------------------------------------------------------
+    // Back-calculated heat transfer coefficient
+    // ------------------------------------------------------------------
+
+    get delta_T() {
+      const dT = this.calandria_T_sat_F - this.massecuite.massecuite_temp;
+      if (dT <= 0) {
+        throw new Error(
+          `Calandria steam T_sat (${this.calandria_T_sat_F.toFixed(1)}°F at ` +
+          `${this.calandria_pressure_psia.toFixed(2)} psia) must exceed ` +
+          `massecuite boiling point (${this.massecuite.massecuite_temp.toFixed(1)}°F).`
+        );
+      }
+      return dT;
+    }
+
+    get U_btu_hr_ft2_F() {
+      return this.heat_transfer_btu_hr / (this.heating_surface_ft2 * this.delta_T);
+    }
+
+    // ------------------------------------------------------------------
+    // Vapor leaving the pan
+    // ------------------------------------------------------------------
+
+    get vapor_evaporated() {
+      const P_vap = this.massecuite.vapor_pressure_psia;
+      return new EvaporatorSteam(P_vap, this.water_evaporated_lb_hr);
+    }
+
+    // ------------------------------------------------------------------
+    // Display
+    // ------------------------------------------------------------------
+
+    properties() {
+      return {
+        feed_flow_lb_hr: this.feed_flow_lb_hr,
+        feed_solids_lb_hr: this.feed_solids_lb_hr,
+        feed_temp_F: this.feed_temp_F,
+        ml_purity: this.ml_purity,
+        masse_purity: this.masse_purity,
+        masse_brix: this.masse_brix,
+        crystal_content_pct: this.massecuite.crystal_content,
+        mother_liquor_brix: this.massecuite.mother_liquor_brix,
+        crystal_yield_pct_brix: this.massecuite.crystal_yield_pct_brix,
+        massecuite_flow_lb_hr: this.massecuite_flow_lb_hr,
+        water_evaporated_lb_hr: this.water_evaporated_lb_hr,
+        inches_vacuum: this.inches_vacuum,
+        vapor_pressure_psia: this.massecuite.vapor_pressure_psia,
+        supersaturation: this.supersaturation,
+        head_ft: this.head_ft,
+        water_bp_surface_F: this.massecuite.water_bp_surface,
+        massecuite_temp_surface_F: this.massecuite.massecuite_temp_surface,
+        water_bp_at_head_F: this.massecuite.water_bp_at_head,
+        massecuite_temp_F: this.massecuite.massecuite_temp,
+        bpr_at_head_F: this.massecuite.bpr_at_head,
+        density_lb_ft3: this.massecuite.density,
+        cp_massecuite: this.cp_massecuite,
+        h_fg_vapor: this.h_fg_vapor,
+        heat_sensible_btu_hr: this.heat_sensible_btu_hr,
+        heat_evaporation_btu_hr: this.heat_evaporation_btu_hr,
+        heat_loss_factor: this.heat_loss_factor,
+        heat_loss_btu_hr: this.heat_loss_btu_hr,
+        heat_transfer_btu_hr: this.heat_transfer_btu_hr,
+        calandria_pressure_psia: this.calandria_pressure_psia,
+        calandria_T_sat_F: this.calandria_T_sat_F,
+        h_fg_calandria: this.h_fg_calandria,
+        steam_flow_lb_hr: this.steam_flow_lb_hr,
+        steam_to_evaporation_ratio: this.steam_to_evaporation_ratio,
+        delta_T_F: this.delta_T,
+        heating_surface_ft2: this.heating_surface_ft2,
+        U_btu_hr_ft2_F: this.U_btu_hr_ft2_F,
+      };
+    }
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = Pan;
+  } else {
+    root.Pan = Pan;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// Port of Crystallizer_and_Reheater.py — water-cooled crystallizer and
+// hot-water reheater for low-grade (C) massecuite. Both are non-contact heat
+// exchangers: cooling/heating water never mixes with the massecuite, so
+// massecuite mass flow is conserved through each unit. Heat balance is
+// sensible-heat only -- heat of crystallization of sucrose is small and
+// neglected here.
+
+(function (root) {
+  'use strict';
+
+  const _CP_WATER = 1.0;       // BTU/lb-F
+  const _LB_PER_GAL_H2O = 8.34; // lb per US gallon of water
+
+  class Crystallizer {
+    constructor({ massecuite_in, massecuite_flow_lb_hr, masse_temp_out_deg_F = 120.0,
+                  ml_purity_out = null, water_temp_in_deg_F = 85.0, water_temp_out_deg_F = 105.0,
+                  name = 'Crystallizer' } = {}) {
+      if (water_temp_out_deg_F <= water_temp_in_deg_F) {
+        throw new Error(`Cooling water must leave hotter than it enters (${water_temp_in_deg_F}→${water_temp_out_deg_F}°F).`);
+      }
+      this.massecuite_in = massecuite_in;
+      this.massecuite_flow_lb_hr = massecuite_flow_lb_hr;
+      this.masse_temp_out_deg_F = masse_temp_out_deg_F;
+      this.ml_purity_out = ml_purity_out;
+      this.water_temp_in_deg_F = water_temp_in_deg_F;
+      this.water_temp_out_deg_F = water_temp_out_deg_F;
+      this.name = name;
+    }
+
+    get masse_temp_in_deg_F() { return this.massecuite_in.massecuite_temp; }
+
+    get massecuite_out() {
+      const ml_out = (this.ml_purity_out !== null && this.ml_purity_out !== undefined)
+        ? this.ml_purity_out : this.massecuite_in.ml_purity;
+      return this.massecuite_in.copy({ temp_F: this.masse_temp_out_deg_F, ml_purity: ml_out });
+    }
+
+    get crystal_growth_lb_hr() {
+      const delta_pct = this.massecuite_out.crystal_content - this.massecuite_in.crystal_content;
+      return this.massecuite_flow_lb_hr * delta_pct / 100.0;
+    }
+
+    get duty_btu_hr() {
+      const dT = this.masse_temp_in_deg_F - this.masse_temp_out_deg_F;
+      if (dT <= 0) {
+        throw new Error(`Crystallizer outlet (${this.masse_temp_out_deg_F}°F) must be cooler than the inlet massecuite (${this.masse_temp_in_deg_F.toFixed(1)}°F).`);
+      }
+      return this.massecuite_flow_lb_hr * this.massecuite_in.specific_heat * dT;
+    }
+
+    get water_lb_hr() {
+      return this.duty_btu_hr / (_CP_WATER * (this.water_temp_out_deg_F - this.water_temp_in_deg_F));
+    }
+
+    get water_gpm() { return this.water_lb_hr / (_LB_PER_GAL_H2O * 60); }
+
+    properties() {
+      return {
+        masse_flow_lb_hr: this.massecuite_flow_lb_hr,
+        masse_temp_in_F: this.masse_temp_in_deg_F,
+        masse_temp_out_F: this.masse_temp_out_deg_F,
+        ml_purity_in: this.massecuite_in.ml_purity,
+        ml_purity_out: this.massecuite_out.ml_purity,
+        crystal_content_in_pct: this.massecuite_in.crystal_content,
+        crystal_content_out_pct: this.massecuite_out.crystal_content,
+        crystal_growth_lb_hr: this.crystal_growth_lb_hr,
+        duty_btu_hr: this.duty_btu_hr,
+        water_temp_in_F: this.water_temp_in_deg_F,
+        water_temp_out_F: this.water_temp_out_deg_F,
+        water_lb_hr: this.water_lb_hr,
+        water_gpm: this.water_gpm,
+      };
+    }
+  }
+
+  class Reheater {
+    constructor({ massecuite_in, massecuite_flow_lb_hr, masse_temp_out_deg_F = 130.0,
+                  ml_purity_out = null, water_temp_in_deg_F = 150.0, water_temp_out_deg_F = 135.0,
+                  name = 'Reheater' } = {}) {
+      if (water_temp_in_deg_F <= water_temp_out_deg_F) {
+        throw new Error(`Heating water must enter hotter than it leaves (${water_temp_in_deg_F}→${water_temp_out_deg_F}°F).`);
+      }
+      this.massecuite_in = massecuite_in;
+      this.massecuite_flow_lb_hr = massecuite_flow_lb_hr;
+      this.masse_temp_out_deg_F = masse_temp_out_deg_F;
+      this.ml_purity_out = ml_purity_out;
+      this.water_temp_in_deg_F = water_temp_in_deg_F;
+      this.water_temp_out_deg_F = water_temp_out_deg_F;
+      this.name = name;
+    }
+
+    get masse_temp_in_deg_F() { return this.massecuite_in.massecuite_temp; }
+
+    get massecuite_out() {
+      const ml_out = (this.ml_purity_out !== null && this.ml_purity_out !== undefined)
+        ? this.ml_purity_out : this.massecuite_in.ml_purity;
+      return this.massecuite_in.copy({ temp_F: this.masse_temp_out_deg_F, ml_purity: ml_out });
+    }
+
+    get duty_btu_hr() {
+      const dT = this.masse_temp_out_deg_F - this.masse_temp_in_deg_F;
+      if (dT <= 0) {
+        throw new Error(`Reheater outlet (${this.masse_temp_out_deg_F}°F) must be hotter than the inlet massecuite (${this.masse_temp_in_deg_F.toFixed(1)}°F).`);
+      }
+      return this.massecuite_flow_lb_hr * this.massecuite_in.specific_heat * dT;
+    }
+
+    get water_lb_hr() {
+      return this.duty_btu_hr / (_CP_WATER * (this.water_temp_in_deg_F - this.water_temp_out_deg_F));
+    }
+
+    get water_gpm() { return this.water_lb_hr / (_LB_PER_GAL_H2O * 60); }
+
+    properties() {
+      return {
+        masse_flow_lb_hr: this.massecuite_flow_lb_hr,
+        masse_temp_in_F: this.masse_temp_in_deg_F,
+        masse_temp_out_F: this.masse_temp_out_deg_F,
+        ml_purity_out: this.massecuite_out.ml_purity,
+        duty_btu_hr: this.duty_btu_hr,
+        water_temp_in_F: this.water_temp_in_deg_F,
+        water_temp_out_F: this.water_temp_out_deg_F,
+        water_lb_hr: this.water_lb_hr,
+        water_gpm: this.water_gpm,
+      };
+    }
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { Crystallizer, Reheater };
+  } else {
+    root.Crystallizer = Crystallizer;
+    root.Reheater = Reheater;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// Port of Centrifugal.py — centrifugal separator, SJM (Sugar-Massecuite-
+// Molasses) material balance. Two-step approach: (1) SJM ideal split with
+// specified S, J, M0; (2) crystal loss as 100%-pol sucrose fragments dissolve
+// into molasses, updating M; (3) final SJM with updated M.
+
+(function (root) {
+  'use strict';
+
+  const SugarStream = (typeof module !== 'undefined' && module.exports) ? require('./sugar_stream.js') : root.SugarStream;
+
+  const _GAL_PER_FT3 = 7.48052; // US gallons per cubic foot
+
+  function _sugarDensityLbFt3(brix, temp_F = 77.0) {
+    const rho_20C = 0.99823 + 3.848e-3 * brix + 1.427e-5 * brix ** 2 + 1.5e-8 * brix ** 3;
+    const temp_C = (temp_F - 32) * 5 / 9;
+    return rho_20C * (1 - 4.1e-4 * (temp_C - 20)) * 62.428;
+  }
+
+  class Centrifugal {
+    constructor({ massecuite, massecuite_flow_lb_hr, target_molasses_brix = 85.0,
+                  purity_rise = 2.0, sugar_purity = 99.5, sugar_moisture = 0.5,
+                  name = 'Centrifugal', sugar_temp = 155, molasses_temp = 155 } = {}) {
+      this.massecuite = massecuite;
+      this.massecuite_flow_lb_hr = massecuite_flow_lb_hr;
+      this.target_molasses_brix = target_molasses_brix;
+      this.purity_rise = purity_rise;
+      this.sugar_purity = sugar_purity;
+      this.sugar_moisture = sugar_moisture;
+      this.name = name;
+      this.sugar_temp = sugar_temp;
+      this.molasses_temp = molasses_temp;
+    }
+
+    // ------------------------------------------------------------------
+    // SJM balance (S = sugar_purity, J = masse_purity, M = molasses_purity)
+    // ------------------------------------------------------------------
+
+    get massecuite_solids_lb_hr() {
+      return this.massecuite_flow_lb_hr * this.massecuite.masse_brix / 100.0;
+    }
+
+    get molasses_purity() {
+      return this.massecuite.ml_purity + this.purity_rise;
+    }
+
+    get crystals_to_sugar_lb_hr() {
+      const S = this.sugar_purity;
+      const J = this.massecuite.masse_purity;
+      const M = this.molasses_purity;
+      return this.massecuite_solids_lb_hr * (J - M) / (S - M);
+    }
+
+    // ------------------------------------------------------------------
+    // Sugar product
+    // ------------------------------------------------------------------
+
+    get sugar_wet_lb_hr() {
+      return this.crystals_to_sugar_lb_hr / (1.0 - this.sugar_moisture / 100.0);
+    }
+
+    get sugar_moisture_lb_hr() {
+      return this.sugar_wet_lb_hr - this.crystals_to_sugar_lb_hr;
+    }
+
+    get sugar_brix() { return 100.0 - this.sugar_moisture; }
+
+    get sugar_pol_lb_hr() {
+      return this.crystals_to_sugar_lb_hr * this.sugar_purity / 100.0;
+    }
+
+    // ------------------------------------------------------------------
+    // Molasses balance
+    // ------------------------------------------------------------------
+
+    get pol_in_lb_hr() {
+      return this.massecuite_solids_lb_hr * this.massecuite.masse_purity / 100.0;
+    }
+
+    get molasses_solids_lb_hr() {
+      return this.massecuite_solids_lb_hr - this.crystals_to_sugar_lb_hr;
+    }
+
+    get molasses_brix() { return this.target_molasses_brix; }
+
+    get molasses_flow_lb_hr() {
+      return this.molasses_solids_lb_hr / (this.target_molasses_brix / 100.0);
+    }
+
+    get wash_water_lb_hr() {
+      const ww = this.molasses_flow_lb_hr + this.sugar_wet_lb_hr - this.massecuite_flow_lb_hr;
+      if (ww < 0) {
+        const naturalBrix = this.molasses_solids_lb_hr / (this.massecuite_flow_lb_hr - this.sugar_wet_lb_hr) * 100;
+        throw new Error(
+          `target_molasses_brix (${this.target_molasses_brix.toFixed(1)}) is higher than the natural ` +
+          `molasses Brix without wash water (${naturalBrix.toFixed(1)}). ` +
+          'Lower the target or set it to None to skip washing.'
+        );
+      }
+      return ww;
+    }
+
+    get pol_to_sugar_lb_hr() { return this.sugar_pol_lb_hr; }
+
+    get pol_to_molasses_lb_hr() { return this.pol_in_lb_hr - this.pol_to_sugar_lb_hr; }
+
+    get molasses_density_lb_ft3() { return _sugarDensityLbFt3(this.molasses_brix, 77.0); }
+
+    get molasses_density_lb_gal() { return this.molasses_density_lb_ft3 / _GAL_PER_FT3; }
+
+    get molasses_flow_gal_min() { return this.molasses_flow_lb_hr / (this.molasses_density_lb_gal * 60.0); }
+
+    get sugar_pol() { return this.sugar_pol_lb_hr / this.sugar_wet_lb_hr * 100; }
+
+    // ------------------------------------------------------------------
+    // Crystal yield
+    // ------------------------------------------------------------------
+
+    get station_crystal_yield_pct_brix() {
+      const J = this.massecuite.masse_purity;
+      const M = this.molasses_purity;
+      return 100.0 * (J - M) / (100.0 - M);
+    }
+
+    get station_crystal_yield_pct_masse() {
+      return this.station_crystal_yield_pct_brix * this.massecuite.masse_brix / 100.0;
+    }
+
+    // ------------------------------------------------------------------
+    // Output streams
+    // ------------------------------------------------------------------
+
+    get sugar_stream() {
+      return new SugarStream({
+        brix: this.sugar_brix,
+        purity: this.sugar_purity,
+        flow_lb_per_hr: this.sugar_wet_lb_hr,
+        temp_deg_F: this.sugar_temp,
+        pressure_psia: 14.7,
+        level_ft: 0,
+      });
+    }
+
+    get molasses_stream() {
+      return new SugarStream({
+        brix: this.molasses_brix,
+        purity: this.molasses_purity,
+        flow_lb_per_hr: this.molasses_flow_lb_hr,
+        temp_deg_F: this.molasses_temp,
+        pressure_psia: 14.7,
+        level_ft: 0,
+      });
+    }
+
+    // ------------------------------------------------------------------
+    // Dict outputs
+    // ------------------------------------------------------------------
+
+    get sugar() {
+      return {
+        flow_wet_lb_hr: this.sugar_wet_lb_hr,
+        flow_dry_lb_hr: this.crystals_to_sugar_lb_hr,
+        pol_lb_hr: this.sugar_pol_lb_hr,
+        purity_pct: this.sugar_purity,
+        moisture_pct: this.sugar_moisture,
+      };
+    }
+
+    get molasses() {
+      return {
+        flow_lb_hr: this.molasses_flow_lb_hr,
+        brix: this.molasses_brix,
+        purity: this.molasses_purity,
+        pol_lb_hr: this.pol_to_molasses_lb_hr,
+      };
+    }
+
+    properties() {
+      return {
+        massecuite_flow_lb_hr: this.massecuite_flow_lb_hr,
+        masse_brix: this.massecuite.masse_brix,
+        masse_purity: this.massecuite.masse_purity,
+        ml_purity: this.massecuite.ml_purity,
+        sugar_purity_pct: this.sugar_purity,
+        molasses_purity_target: this.molasses_purity,
+        purity_rise: this.purity_rise,
+        target_molasses_brix: this.target_molasses_brix,
+        wash_water_lb_hr: this.wash_water_lb_hr,
+        sugar_solids_lb_hr: this.crystals_to_sugar_lb_hr,
+        sugar_moisture_pct: this.sugar_moisture,
+        sugar_wet_lb_hr: this.sugar_wet_lb_hr,
+        sugar_moisture_lb_hr: this.sugar_moisture_lb_hr,
+        sugar_pol_lb_hr: this.sugar_pol_lb_hr,
+        pol_in_lb_hr: this.pol_in_lb_hr,
+        pol_to_sugar_lb_hr: this.pol_to_sugar_lb_hr,
+        pol_to_molasses_lb_hr: this.pol_to_molasses_lb_hr,
+        molasses_flow_lb_hr: this.molasses_flow_lb_hr,
+        molasses_brix: this.molasses_brix,
+        molasses_purity: this.molasses_purity,
+        station_crystal_yield_pct_brix: this.station_crystal_yield_pct_brix,
+        station_crystal_yield_pct_masse: this.station_crystal_yield_pct_masse,
+      };
+    }
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = Centrifugal;
+  } else {
+    root.Centrifugal = Centrifugal;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// Port of FourBoilingDoubleMagma.py — Four Boiling Double Magma pan floor
+// balance: A1, A2, B, C pans with grain pans. When constructing with Pan and
+// Centrifugal "config" objects, feed_streams/massecuite are ignored -- the
+// solver rebuilds a fresh Pan/Centrifugal each iteration with the real,
+// upstream-derived feed streams (see _rebuildPan/_rebuildCentrifugal), same
+// as the Python source.
+
+(function (root) {
+  'use strict';
+
+  const SugarStream = (typeof module !== 'undefined' && module.exports) ? require('./sugar_stream.js') : root.SugarStream;
+  const Pan = (typeof module !== 'undefined' && module.exports) ? require('./pan.js') : root.Pan;
+  const Centrifugal = (typeof module !== 'undefined' && module.exports) ? require('./centrifugal.js') : root.Centrifugal;
+  const { Crystallizer, Reheater } = (typeof module !== 'undefined' && module.exports) ? require('./crystallizer_reheater.js') : { Crystallizer: root.Crystallizer, Reheater: root.Reheater };
+  const condensate_utils = (typeof module !== 'undefined' && module.exports) ? require('./condensate_utils.js') : root.condensate_utils;
+
+  function makeMagma(sugar_stream, mingler_brix) {
+    const magma = SugarStream.copy(sugar_stream);
+    const solids = magma.solids_flow;
+    magma.brix = mingler_brix;
+    magma.flow_lb_per_hr = solids / magma.brix * 100;
+    return magma;
+  }
+
+  function makeRemelt(magma, remelt_brix) {
+    const remelt = SugarStream.copy(magma);
+    const brix_flow = magma.solids_flow;
+    const new_flow = brix_flow * 100 / remelt_brix;
+    const new_brix = brix_flow / new_flow * 100;
+    remelt.flow_lb_per_hr = new_flow;
+    remelt.brix = new_brix;
+    return remelt;
+  }
+
+  function diluteMolasses(mol, diluted_brix) {
+    const diluted = SugarStream.copy(mol);
+    diluted.brix = diluted_brix;
+    diluted.flow_lb_per_hr = mol.solids_flow / (diluted_brix / 100);
+    return diluted;
+  }
+
+  class FourBoilingDoubleMagma {
+    constructor({
+      syrup,
+      A1_pans, A2_pans, B_pans, C_pans, grain_pans,
+      A1_centrifugals, A2_centrifugals, B_centrifugals, C_centrifugals,
+      C_crystallizers = null, C_reheaters = null,
+      syrup_to_A1_pans_pct = 75, syrup_to_A2_pans_pct = 20,
+      a1_mol_to_A2_pct = 80, a1_mol_to_grain_pct = 3,
+      a2_mol_to_grain_pct = 3, b_mol_to_grain_pct = 10,
+      b_magma_A1_footing_pct = 40, b_magma_A2_footing_pct = 40,
+      c_magma_B_footing_pct = 80,
+      a1_mol_dilution_brix = 70, a2_mol_dilution_brix = 70, b_mol_dilution_brix = 70,
+      b_magma_brix = 92, c_magma_brix = 92,
+      b_remelt_brix = 65, c_remelt_brix = 65,
+      injection_water_temp_F = 90, condenser_leg_temp_drop_F = 5,
+      iterations = 15,
+    } = {}) {
+      this.syrup = syrup;
+      this.injection_water_temp_F = injection_water_temp_F;
+      this.condensor_leg_temp_drop_F = condenser_leg_temp_drop_F;
+
+      this._A1_pans_cfg = A1_pans;
+      this._A2_pans_cfg = A2_pans;
+      this._B_pans_cfg = B_pans;
+      this._C_pans_cfg = C_pans;
+      this._grain_pans_cfg = grain_pans;
+      this._A1_cen_cfg = A1_centrifugals;
+      this._A2_cen_cfg = A2_centrifugals;
+      this._B_cen_cfg = B_centrifugals;
+      this._C_cen_cfg = C_centrifugals;
+      this._C_crys_cfg = C_crystallizers !== null && C_crystallizers !== undefined
+        ? C_crystallizers
+        : new Crystallizer({ massecuite_in: null, massecuite_flow_lb_hr: 0, name: 'C Crystallizers' });
+      this._C_reheat_cfg = C_reheaters !== null && C_reheaters !== undefined
+        ? C_reheaters
+        : new Reheater({ massecuite_in: null, massecuite_flow_lb_hr: 0, name: 'C Reheaters' });
+
+      this.syrup_to_A1_pans_pct = syrup_to_A1_pans_pct;
+      this.syrup_to_A2_pans_pct = syrup_to_A2_pans_pct;
+      this.syrup_to_grain_pct = 100.0 - syrup_to_A1_pans_pct - syrup_to_A2_pans_pct;
+
+      this.a1_mol_to_A2_pct = a1_mol_to_A2_pct;
+      this.a1_mol_to_grain_pct = a1_mol_to_grain_pct;
+      this.a1_mol_to_B_pct = 100.0 - a1_mol_to_A2_pct - a1_mol_to_grain_pct;
+
+      this.a2_mol_to_grain_pct = a2_mol_to_grain_pct;
+      this.a2_mol_to_B_pct = 100.0 - a2_mol_to_grain_pct;
+
+      this.b_mol_to_grain_pct = b_mol_to_grain_pct;
+      this.b_mol_to_C_pct = 100.0 - b_mol_to_grain_pct;
+
+      this.b_magma_A1_footing_pct = b_magma_A1_footing_pct;
+      this.b_magma_A2_footing_pct = b_magma_A2_footing_pct;
+      this.b_magma_remelt_pct = 100.0 - b_magma_A1_footing_pct - b_magma_A2_footing_pct;
+
+      this.c_magma_B_footing_pct = c_magma_B_footing_pct;
+      this.c_magma_remelt_pct = 100.0 - c_magma_B_footing_pct;
+
+      this.a1_mol_dilution_brix = a1_mol_dilution_brix;
+      this.a2_mol_dilution_brix = a2_mol_dilution_brix;
+      this.b_mol_dilution_brix = b_mol_dilution_brix;
+      this.b_magma_brix = b_magma_brix;
+      this.c_magma_brix = c_magma_brix;
+      this.b_remelt_brix = b_remelt_brix;
+      this.c_remelt_brix = c_remelt_brix;
+
+      this._solve(iterations);
+    }
+
+    _rebuildPan(config, feed_streams) {
+      return new Pan({
+        feed_streams: feed_streams,
+        heating_surface_ft2: config.heating_surface_ft2,
+        inches_vacuum: config.inches_vacuum,
+        supersaturation: config.supersaturation,
+        head_ft: config.head_ft,
+        masse_brix: config.masse_brix,
+        ml_purity: config.ml_purity,
+        calandria_pressure_psia: config.calandria_pressure_psia,
+        heat_loss_factor: config.heat_loss_factor,
+        name: config.name,
+        steam_type: config.steam_type,
+      });
+    }
+
+    _rebuildCentrifugal(config, massecuite, massecuite_flow_lb_hr) {
+      return new Centrifugal({
+        massecuite: massecuite,
+        massecuite_flow_lb_hr: massecuite_flow_lb_hr,
+        target_molasses_brix: config.target_molasses_brix,
+        purity_rise: config.purity_rise,
+        sugar_purity: config.sugar_purity,
+        sugar_moisture: config.sugar_moisture,
+        name: config.name,
+        sugar_temp: config.sugar_temp,
+        molasses_temp: config.molasses_temp,
+      });
+    }
+
+    _rebuildCrystallizer(config, massecuite_in, massecuite_flow_lb_hr) {
+      return new Crystallizer({
+        massecuite_in: massecuite_in,
+        massecuite_flow_lb_hr: massecuite_flow_lb_hr,
+        masse_temp_out_deg_F: config.masse_temp_out_deg_F,
+        ml_purity_out: config.ml_purity_out,
+        water_temp_in_deg_F: config.water_temp_in_deg_F,
+        water_temp_out_deg_F: config.water_temp_out_deg_F,
+        name: config.name,
+      });
+    }
+
+    _rebuildReheater(config, massecuite_in, massecuite_flow_lb_hr) {
+      return new Reheater({
+        massecuite_in: massecuite_in,
+        massecuite_flow_lb_hr: massecuite_flow_lb_hr,
+        masse_temp_out_deg_F: config.masse_temp_out_deg_F,
+        ml_purity_out: config.ml_purity_out,
+        water_temp_in_deg_F: config.water_temp_in_deg_F,
+        water_temp_out_deg_F: config.water_temp_out_deg_F,
+        name: config.name,
+      });
+    }
+
+    _solve(iterations = 15) {
+      let b_magma_A1_footing = new SugarStream({ brix: this.b_magma_brix, purity: 92, flow_lb_per_hr: 0, temp_deg_F: 130 });
+      let b_magma_A2_footing = new SugarStream({ brix: this.b_magma_brix, purity: 92, flow_lb_per_hr: 0, temp_deg_F: 130 });
+      let c_magma_B_footing = new SugarStream({ brix: this.c_magma_brix, purity: 85, flow_lb_per_hr: 0, temp_deg_F: 130 });
+
+      let syrup_as_fed = SugarStream.copy(this.syrup);
+
+      let a1_mol_diluted, a2_mol_diluted, b_mol_diluted;
+      let b_magma, c_magma, b_magma_to_rmlt, c_magma_to_rmlt, b_remelt, c_remelt;
+
+      for (let iter = 0; iter < iterations; iter++) {
+        // -- Split syrup --
+        const syrup_to_A1 = SugarStream.copy(syrup_as_fed);
+        syrup_to_A1.flow_lb_per_hr = this.syrup_to_A1_pans_pct / 100 * syrup_as_fed.flow_lb_per_hr;
+
+        const syrup_to_A2 = SugarStream.copy(syrup_as_fed);
+        syrup_to_A2.flow_lb_per_hr = this.syrup_to_A2_pans_pct / 100 * syrup_as_fed.flow_lb_per_hr;
+
+        const syrup_to_grain = SugarStream.copy(syrup_as_fed);
+        syrup_to_grain.flow_lb_per_hr = this.syrup_to_grain_pct / 100 * syrup_as_fed.flow_lb_per_hr;
+
+        // -- A1 pans --
+        this.A1_pans = this._rebuildPan(this._A1_pans_cfg, [syrup_to_A1, b_magma_A1_footing]);
+        this.A1_centrifugals = this._rebuildCentrifugal(this._A1_cen_cfg, this.A1_pans.massecuite, this.A1_pans.massecuite_flow_lb_hr);
+
+        a1_mol_diluted = diluteMolasses(this.A1_centrifugals.molasses_stream, this.a1_mol_dilution_brix);
+
+        const a1_mol_to_A2 = SugarStream.copy(a1_mol_diluted);
+        a1_mol_to_A2.flow_lb_per_hr = this.a1_mol_to_A2_pct / 100 * a1_mol_diluted.flow_lb_per_hr;
+
+        const a1_mol_to_grain = SugarStream.copy(a1_mol_diluted);
+        a1_mol_to_grain.flow_lb_per_hr = this.a1_mol_to_grain_pct / 100 * a1_mol_diluted.flow_lb_per_hr;
+
+        const a1_mol_to_B = SugarStream.copy(a1_mol_diluted);
+        a1_mol_to_B.flow_lb_per_hr = this.a1_mol_to_B_pct / 100 * a1_mol_diluted.flow_lb_per_hr;
+
+        // -- A2 pans --
+        this.A2_pans = this._rebuildPan(this._A2_pans_cfg, [syrup_to_A2, a1_mol_to_A2, b_magma_A2_footing]);
+        this.A2_centrifugals = this._rebuildCentrifugal(this._A2_cen_cfg, this.A2_pans.massecuite, this.A2_pans.massecuite_flow_lb_hr);
+
+        a2_mol_diluted = diluteMolasses(this.A2_centrifugals.molasses_stream, this.a2_mol_dilution_brix);
+
+        const a2_mol_to_grain = SugarStream.copy(a2_mol_diluted);
+        a2_mol_to_grain.flow_lb_per_hr = this.a2_mol_to_grain_pct / 100 * a2_mol_diluted.flow_lb_per_hr;
+
+        const a2_mol_to_B = SugarStream.copy(a2_mol_diluted);
+        a2_mol_to_B.flow_lb_per_hr = this.a2_mol_to_B_pct / 100 * a2_mol_diluted.flow_lb_per_hr;
+
+        // -- B pans --
+        this.B_pans = this._rebuildPan(this._B_pans_cfg, [a2_mol_to_B, c_magma_B_footing, a1_mol_to_B]);
+        this.B_centrifugals = this._rebuildCentrifugal(this._B_cen_cfg, this.B_pans.massecuite, this.B_pans.massecuite_flow_lb_hr);
+
+        b_magma = makeMagma(this.B_centrifugals.sugar_stream, this.b_magma_brix);
+        b_magma_A1_footing = SugarStream.copy(b_magma);
+        b_magma_A1_footing.flow_lb_per_hr = this.b_magma_A1_footing_pct / 100 * b_magma.flow_lb_per_hr;
+        b_magma_A2_footing = SugarStream.copy(b_magma);
+        b_magma_A2_footing.flow_lb_per_hr = this.b_magma_A2_footing_pct / 100 * b_magma.flow_lb_per_hr;
+        b_magma_to_rmlt = SugarStream.copy(b_magma);
+        b_magma_to_rmlt.flow_lb_per_hr = this.b_magma_remelt_pct / 100 * b_magma.flow_lb_per_hr;
+
+        b_mol_diluted = diluteMolasses(this.B_centrifugals.molasses_stream, this.b_mol_dilution_brix);
+
+        const b_mol_to_grain = SugarStream.copy(b_mol_diluted);
+        b_mol_to_grain.flow_lb_per_hr = this.b_mol_to_grain_pct / 100 * b_mol_diluted.flow_lb_per_hr;
+
+        const b_mol_to_C = SugarStream.copy(b_mol_diluted);
+        b_mol_to_C.flow_lb_per_hr = this.b_mol_to_C_pct / 100 * b_mol_diluted.flow_lb_per_hr;
+
+        // -- Grain pans --
+        this.grain_pans = this._rebuildPan(this._grain_pans_cfg, [syrup_to_grain, a1_mol_to_grain, a2_mol_to_grain, b_mol_to_grain]);
+
+        const grain_massecuite = new SugarStream({
+          brix: this.grain_pans.masse_brix,
+          purity: this.grain_pans.masse_purity,
+          flow_lb_per_hr: this.grain_pans.massecuite_flow_lb_hr,
+          temp_deg_F: this.grain_pans.massecuite.massecuite_temp,
+          pressure_psia: 14.7,
+          level_ft: 0,
+        });
+
+        // -- C pans --
+        this.C_pans = this._rebuildPan(this._C_pans_cfg, [grain_massecuite, b_mol_to_C]);
+
+        this.C_crystallizers = this._rebuildCrystallizer(this._C_crys_cfg, this.C_pans.massecuite, this.C_pans.massecuite_flow_lb_hr);
+        this.C_reheaters = this._rebuildReheater(this._C_reheat_cfg, this.C_crystallizers.massecuite_out, this.C_pans.massecuite_flow_lb_hr);
+        this.C_centrifugals = this._rebuildCentrifugal(this._C_cen_cfg, this.C_reheaters.massecuite_out, this.C_pans.massecuite_flow_lb_hr);
+
+        c_magma = makeMagma(this.C_centrifugals.sugar_stream, this.c_magma_brix);
+        c_magma_B_footing = SugarStream.copy(c_magma);
+        c_magma_B_footing.flow_lb_per_hr = this.c_magma_B_footing_pct / 100 * c_magma.flow_lb_per_hr;
+        c_magma_to_rmlt = SugarStream.copy(c_magma);
+        c_magma_to_rmlt.flow_lb_per_hr = this.c_magma_remelt_pct / 100 * c_magma.flow_lb_per_hr;
+
+        b_remelt = makeRemelt(b_magma_to_rmlt, this.b_remelt_brix);
+        c_remelt = makeRemelt(c_magma_to_rmlt, this.c_remelt_brix);
+
+        const total_flows = this.syrup.flow_lb_per_hr + b_remelt.flow_lb_per_hr + c_remelt.flow_lb_per_hr;
+        const total_solids = this.syrup.solids_flow + b_remelt.solids_flow + c_remelt.solids_flow;
+        const total_pols = this.syrup.pol_flow + b_remelt.pol_flow + c_remelt.pol_flow;
+
+        syrup_as_fed = SugarStream.copy(this.syrup);
+        syrup_as_fed.flow_lb_per_hr = total_flows;
+        syrup_as_fed.brix = total_solids / total_flows * 100;
+        syrup_as_fed.purity = total_pols / total_solids * 100;
+      }
+
+      this.syrup_as_fed = syrup_as_fed;
+
+      this._a1_mol_diluted = a1_mol_diluted;
+      this._a2_mol_diluted = a2_mol_diluted;
+      this._b_mol_diluted = b_mol_diluted;
+
+      this._b_magma = b_magma;
+      this._c_magma = c_magma;
+      this._b_magma_A1_footing = b_magma_A1_footing;
+      this._b_magma_A2_footing = b_magma_A2_footing;
+      this._c_magma_B_footing = c_magma_B_footing;
+      this._b_magma_to_rmlt = b_magma_to_rmlt;
+      this._c_magma_to_rmlt = c_magma_to_rmlt;
+      this._b_remelt = b_remelt;
+      this._c_remelt = c_remelt;
+    }
+
+    get _pans() {
+      return [this.A1_pans, this.A2_pans, this.B_pans, this.grain_pans, this.C_pans];
+    }
+
+    _steamDemandLbHr(steam_type) {
+      return this._pans.filter((p) => p.steam_type === steam_type).reduce((s, p) => s + p.steam_flow_lb_hr, 0);
+    }
+
+    get total_raw_sugar() {
+      const a1 = this.A1_centrifugals.sugar_stream;
+      const a2 = this.A2_centrifugals.sugar_stream;
+      const total_flow = a1.flow_lb_per_hr + a2.flow_lb_per_hr;
+      const total_solids = a1.solids_flow + a2.solids_flow;
+      const total_pol = a1.pol_flow + a2.pol_flow;
+      const combined = SugarStream.copy(a1);
+      combined.flow_lb_per_hr = total_flow;
+      combined.brix = total_solids / total_flow * 100;
+      combined.purity = total_pol / total_solids * 100;
+      return combined;
+    }
+
+    get total_exhaust_steam_lb_hr() { return this._steamDemandLbHr(0); }
+    get total_V1_steam_lb_hr() { return this._steamDemandLbHr(1); }
+    get total_V2_steam_lb_hr() { return this._steamDemandLbHr(2); }
+    get total_V3_steam_lb_hr() { return this._steamDemandLbHr(3); }
+    get total_V4_steam_lb_hr() { return this._steamDemandLbHr(4); }
+
+    get clean_condensate() {
+      return this._pans.filter((p) => p.steam_type === 0)
+        .reduce((s, p) => s + condensate_utils.flash_condensate(p.steam_flow_lb_hr, p.calandria_T_sat_F), 0);
+    }
+
+    get dirty_condensate() {
+      return this._pans.filter((p) => p.steam_type !== 0)
+        .reduce((s, p) => s + condensate_utils.flash_condensate(p.steam_flow_lb_hr, p.calandria_T_sat_F), 0);
+    }
+
+    get total_water() {
+      const cen_wash = this.A1_centrifugals.wash_water_lb_hr + this.A2_centrifugals.wash_water_lb_hr
+        + this.B_centrifugals.wash_water_lb_hr + this.C_centrifugals.wash_water_lb_hr;
+      const b_mingler = this._b_magma.flow_lb_per_hr - this.B_centrifugals.sugar_stream.flow_lb_per_hr;
+      const c_mingler = this._c_magma.flow_lb_per_hr - this.C_centrifugals.sugar_stream.flow_lb_per_hr;
+      const b_rmlt_water = this._b_remelt.flow_lb_per_hr - this._b_magma_to_rmlt.flow_lb_per_hr;
+      const c_rmlt_water = this._c_remelt.flow_lb_per_hr - this._c_magma_to_rmlt.flow_lb_per_hr;
+      const a1_dil_water = this._a1_mol_diluted.flow_lb_per_hr - this.A1_centrifugals.molasses_stream.flow_lb_per_hr;
+      const a2_dil_water = this._a2_mol_diluted.flow_lb_per_hr - this.A2_centrifugals.molasses_stream.flow_lb_per_hr;
+      const b_dil_water = this._b_mol_diluted.flow_lb_per_hr - this.B_centrifugals.molasses_stream.flow_lb_per_hr;
+      const total_lb_hr = cen_wash + b_mingler + c_mingler + b_rmlt_water + c_rmlt_water
+        + a1_dil_water + a2_dil_water + b_dil_water;
+      return new SugarStream({ brix: 0, purity: 0, flow_lb_per_hr: total_lb_hr });
+    }
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { FourBoilingDoubleMagma, makeMagma, makeRemelt, diluteMolasses };
+  } else {
+    root.FourBoilingDoubleMagma = FourBoilingDoubleMagma;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
 (function () {
   'use strict';
 
@@ -2213,7 +3437,7 @@ table.editable th, table.editable td { padding: 4px 6px; }
     { id: 'mill', label: 'Mill Floor', enabled: true },
     { id: 'clar', label: 'Clarification', enabled: true },
     { id: 'heat', label: 'Juice Heating', enabled: true },
-    { id: 'pan', label: 'Pan Floor', enabled: false },
+    { id: 'pan', label: 'Pan Floor', enabled: true },
     { id: 'evap', label: 'Evaporation', enabled: false },
     { id: 'exhaust', label: 'Exhaust Summary', enabled: false },
     { id: 'turb', label: 'Turbines & Boiler', enabled: true },
@@ -2342,7 +3566,7 @@ table.editable th, table.editable td { padding: 4px 6px; }
   // Shared plant state -- lets later tabs (Clarification, ...) chain off
   // the mill floor's mixed juice / bagasse streams once it has been solved.
   // ---------------------------------------------------------------------
-  const PlantState = { mill: null, clar: null, heat: null };
+  const PlantState = { mill: null, clar: null, heat: null, pan: null };
 
   function inputField(id, label, value, step) {
     return `<div><label for="${id}">${label}</label><input id="${id}" type="number" step="${step || 'any'}" value="${value}"></div>`;
@@ -3125,12 +4349,448 @@ table.editable th, table.editable td { padding: 4px 6px; }
     section.querySelector('#ht-calc').click();
   }
 
+  // ---------------------------------------------------------------------
+  // Pan Floor tab -- Four Boiling Double Magma (FBDM) scheme only for now
+  // (see web/PROGRESS.md Phase 3). Mirrors streamlit_app.py's Pan Floor tab
+  // with the boiling-scheme radio fixed to FBDM; TBDM/3B/2B are future work.
+  // ---------------------------------------------------------------------
+
+  // resolve_cj() equivalent: clarified juice post juice-heating if that stage
+  // has ever solved, otherwise straight from Clarification.
+  function resolveCj() {
+    return PlantState.heat ? PlantState.heat.clar_juice_heater.juice_out : PlantState.clar.clarified_juice_stream;
+  }
+
+  function pfGrade(name, suffix) {
+    return name.endsWith(suffix) ? name.slice(0, name.length - suffix.length).trim() : name;
+  }
+
+  function pfScaled(stream, pct) {
+    const out = SugarStream.copy(stream);
+    out.flow_lb_per_hr = stream.flow_lb_per_hr * pct / 100;
+    return out;
+  }
+
+  function combineStreams(streams) {
+    streams = streams.filter((s) => s.flow_lb_per_hr > 0);
+    if (!streams.length) return new SugarStream({ brix: 0, purity: 0, flow_lb_per_hr: 0, temp_deg_F: 0 });
+    const total_flow = streams.reduce((s, x) => s + x.flow_lb_per_hr, 0);
+    const total_solids = streams.reduce((s, x) => s + x.solids_flow, 0);
+    const total_pol = streams.reduce((s, x) => s + x.pol_flow, 0);
+    const combined = SugarStream.copy(streams[0]);
+    combined.flow_lb_per_hr = total_flow;
+    combined.brix = total_solids / total_flow * 100;
+    combined.purity = total_solids ? total_pol / total_solids * 100 : 0;
+    combined.temp_deg_F = streams.reduce((s, x) => s + x.flow_lb_per_hr * x.temp_deg_F, 0) / total_flow;
+    return combined;
+  }
+
+  function pfStreamRow(section, name, tag, s) {
+    return [section, name, tag, fmt(s.flow_lb_per_hr, 0), s.pol ? fmt(s.pol, 2) : '-', fmt(s.brix, 2),
+      fmt(s.purity, 2), fmt(s.pol_flow, 0), fmt(s.solids_flow, 0), fmt(s.cu_ft_hr, 1),
+      fmt(s.specific_gravity, 3), fmt(s.temp_deg_F, 1), '-'];
+  }
+
+  function pfWaterRow(section, name, tag, flow_lb_hr, temp_deg_F = null) {
+    return [section, name, tag, fmt(flow_lb_hr, 0), '-', fmt(0, 2), '-', fmt(0, 0), fmt(0, 0),
+      fmt(flow_lb_hr ? flow_lb_hr / 62.4 : 0, 1), fmt(1.0, 3),
+      temp_deg_F === null ? '-' : fmt(temp_deg_F, 1), '-'];
+  }
+
+  function pfVaporRow(section, name, tag, flow_lb_hr, temp_deg_F = null) {
+    return [section, name, tag, fmt(flow_lb_hr, 0), '-', fmt(0, 2), '-', fmt(0, 0), fmt(0, 0),
+      '-', '-', temp_deg_F === null ? '-' : fmt(temp_deg_F, 1), '-'];
+  }
+
+  function pfMasseRow(section, name, tag, masse, flow_lb_hr) {
+    return [section, name, tag, fmt(flow_lb_hr, 0), fmt(masse.masse_purity * masse.masse_brix / 100, 2),
+      fmt(masse.masse_brix, 2), fmt(masse.masse_purity, 2),
+      fmt(flow_lb_hr * masse.masse_purity * masse.masse_brix / 10000, 0),
+      fmt(flow_lb_hr * masse.masse_brix / 100, 0), fmt(flow_lb_hr / masse.density, 1),
+      fmt(masse.density / 62.4, 3), fmt(masse.massecuite_temp, 1), fmt(masse.crystal_content, 1)];
+  }
+
+  function pfPanRows(section, pan, feedNames) {
+    const grade = pfGrade(pan.name, 'Pans');
+    const rows = pan.feed_streams.map((f, i) => pfStreamRow(section, feedNames[i] || `Feed ${i + 1}`, 'Entering', f));
+    rows.push(pfMasseRow(section, `${grade} Massecuite`, 'Leaving', pan.massecuite, pan.massecuite_flow_lb_hr));
+    rows.push(pfVaporRow(section, 'Vapors', 'Leaving', pan.water_evaporated_lb_hr, pan.massecuite.water_bp_surface));
+    return rows;
+  }
+
+  function pfCenRows(section, cen) {
+    const grade = pfGrade(cen.name, 'Centrifugals');
+    return [
+      pfMasseRow(section, `${grade} Massecuite`, 'Entering', cen.massecuite, cen.massecuite_flow_lb_hr),
+      pfWaterRow(section, 'Wash Water', 'Entering', cen.wash_water_lb_hr),
+      pfStreamRow(section, `${grade} Sugar`, 'Leaving', cen.sugar_stream),
+      pfStreamRow(section, `${grade} Molasses`, 'Leaving', cen.molasses_stream),
+    ];
+  }
+
+  function pfDilRows(section, undiluted, diluted, label) {
+    const water = diluted.flow_lb_per_hr - undiluted.flow_lb_per_hr;
+    return [
+      pfStreamRow(section, `${label} (undiluted)`, 'Entering', undiluted),
+      pfWaterRow(section, 'Dilution Water', 'Entering', water),
+      pfStreamRow(section, `${label} (diluted)`, 'Leaving', diluted),
+    ];
+  }
+
+  function pfMagmaRows(section, sugar, magma, label) {
+    const water = magma.flow_lb_per_hr - sugar.flow_lb_per_hr;
+    return [
+      pfStreamRow(section, `${label} Sugar`, 'Entering', sugar),
+      pfWaterRow(section, 'Mingler Water', 'Entering', water),
+      pfStreamRow(section, `${label} Magma`, 'Leaving', magma),
+    ];
+  }
+
+  function pfMagmaSplitRows(section, destinations) {
+    return destinations.map(([label, s]) => pfStreamRow(section, label, 'Internal', s));
+  }
+
+  function pfRemeltRows(section, magmaToRmlt, remelt, label) {
+    const water = remelt.flow_lb_per_hr - magmaToRmlt.flow_lb_per_hr;
+    return [
+      pfStreamRow(section, `${label} Magma (to Remelt)`, 'Entering', magmaToRmlt),
+      pfWaterRow(section, 'Remelt Water', 'Entering', water),
+      pfStreamRow(section, `${label} Remelt`, 'Leaving', remelt),
+    ];
+  }
+
+  function pfHeatxRows(section, unit) {
+    return [
+      pfMasseRow(section, 'Massecuite Entering', 'Entering', unit.massecuite_in, unit.massecuite_flow_lb_hr),
+      pfMasseRow(section, 'Massecuite Leaving', 'Leaving', unit.massecuite_out, unit.massecuite_flow_lb_hr),
+    ];
+  }
+
+  function pfOverallRows(fb, sugarRows) {
+    const section = 'Overall';
+    const finalMolasses = fb.C_centrifugals.molasses_stream;
+    const pans = fb._pans;
+    const totalVapor = pans.reduce((s, p) => s + p.water_evaporated_lb_hr, 0);
+    const vaporTemp = totalVapor
+      ? pans.reduce((s, p) => s + p.water_evaporated_lb_hr * p.massecuite.water_bp_surface, 0) / totalVapor
+      : 0;
+    const rows = [pfStreamRow(section, 'Syrup From Evaporators', 'Entering', fb.syrup)];
+    rows.push(pfWaterRow(section, 'Total Water', 'Entering', fb.total_water.flow_lb_per_hr));
+    sugarRows.forEach(([label, s]) => rows.push(pfStreamRow(section, label, 'Leaving', s)));
+    rows.push(pfStreamRow(section, 'Final Molasses', 'Leaving', finalMolasses));
+    rows.push(pfWaterRow(section, 'Vapors', 'Leaving', totalVapor, vaporTemp));
+    return rows;
+  }
+
+  function fourBoilingRows(fb) {
+    const a1_sugar = fb.A1_centrifugals.sugar_stream;
+    const a2_sugar = fb.A2_centrifugals.sugar_stream;
+    const combined_remelt = combineStreams([fb._b_remelt, fb._c_remelt]);
+    const combined_magma_to_rmlt = combineStreams([fb._b_magma_to_rmlt, fb._c_magma_to_rmlt]);
+
+    let rows = pfOverallRows(fb, [['A1 Sugar', a1_sugar], ['A2 Sugar', a2_sugar]]);
+    rows = rows.concat(pfRemeltRows('Remelt Station', combined_magma_to_rmlt, combined_remelt, 'B+C'));
+
+    rows.push(pfStreamRow('Syrup Tanks', 'Syrup From Evaporators', 'Entering', fb.syrup));
+    rows.push(pfStreamRow('Syrup Tanks', 'Remelt', 'Entering', combined_remelt));
+    rows.push(pfStreamRow('Syrup Tanks', 'Syrup Remelt Blend', 'Leaving', fb.syrup_as_fed));
+
+    rows.push(pfStreamRow('Syrup Distribution', 'Syrup to A1 Pans', 'Internal', pfScaled(fb.syrup_as_fed, fb.syrup_to_A1_pans_pct)));
+    rows.push(pfStreamRow('Syrup Distribution', 'Syrup to A2 Pans', 'Internal', pfScaled(fb.syrup_as_fed, fb.syrup_to_A2_pans_pct)));
+    rows.push(pfStreamRow('Syrup Distribution', 'Syrup to Grain Pans', 'Internal', pfScaled(fb.syrup_as_fed, fb.syrup_to_grain_pct)));
+
+    rows = rows.concat(pfPanRows('A1 Station - Pans', fb.A1_pans, ['Syrup', 'B Magma A1 Footing']));
+    rows = rows.concat(pfCenRows('A1 Station - Centrifugals', fb.A1_centrifugals));
+    rows = rows.concat(pfDilRows('A1 Station - A1 Molasses Dilution', fb.A1_centrifugals.molasses_stream, fb._a1_mol_diluted, 'A1 Molasses'));
+    rows.push(pfStreamRow('A1 Station - A1 Molasses Distribution', 'A1 Molasses to A2', 'Internal', pfScaled(fb._a1_mol_diluted, fb.a1_mol_to_A2_pct)));
+    rows.push(pfStreamRow('A1 Station - A1 Molasses Distribution', 'A1 Molasses to Grain', 'Internal', pfScaled(fb._a1_mol_diluted, fb.a1_mol_to_grain_pct)));
+    rows.push(pfStreamRow('A1 Station - A1 Molasses Distribution', 'A1 Molasses to B', 'Internal', pfScaled(fb._a1_mol_diluted, fb.a1_mol_to_B_pct)));
+
+    rows = rows.concat(pfPanRows('A2 Station - Pans', fb.A2_pans, ['Syrup', 'A1 Molasses', 'B Magma A2 Footing']));
+    rows = rows.concat(pfCenRows('A2 Station - Centrifugals', fb.A2_centrifugals));
+    rows = rows.concat(pfDilRows('A2 Station - A2 Molasses Dilution', fb.A2_centrifugals.molasses_stream, fb._a2_mol_diluted, 'A2 Molasses'));
+    rows.push(pfStreamRow('A2 Station - A2 Molasses Distribution', 'A2 Molasses to Grain', 'Internal', pfScaled(fb._a2_mol_diluted, fb.a2_mol_to_grain_pct)));
+    rows.push(pfStreamRow('A2 Station - A2 Molasses Distribution', 'A2 Molasses to B', 'Internal', pfScaled(fb._a2_mol_diluted, fb.a2_mol_to_B_pct)));
+
+    rows = rows.concat(pfPanRows('B Station - Pans', fb.B_pans, ['A2 Molasses to B', 'C Magma B Footing', 'A1 Molasses to B']));
+    rows = rows.concat(pfCenRows('B Station - Centrifugals', fb.B_centrifugals));
+    rows = rows.concat(pfMagmaRows('B Station - B Mingler', fb.B_centrifugals.sugar_stream, fb._b_magma, 'B'));
+    rows = rows.concat(pfMagmaSplitRows('B Station - B Magma Distribution', [
+      ['B Magma to A1 Footing', fb._b_magma_A1_footing],
+      ['B Magma to A2 Footing', fb._b_magma_A2_footing],
+      ['B Magma to Remelt', fb._b_magma_to_rmlt],
+    ]));
+    rows = rows.concat(pfDilRows('B Station - Molasses Dilution', fb.B_centrifugals.molasses_stream, fb._b_mol_diluted, 'B Molasses'));
+    rows.push(pfStreamRow('B Station - B Molasses Distribution', 'B Molasses to Grain', 'Internal', pfScaled(fb._b_mol_diluted, fb.b_mol_to_grain_pct)));
+    rows.push(pfStreamRow('B Station - B Molasses Distribution', 'B Molasses to C Pans', 'Internal', pfScaled(fb._b_mol_diluted, fb.b_mol_to_C_pct)));
+
+    rows = rows.concat(pfPanRows('Grain Pans', fb.grain_pans, ['Syrup', 'A1 Molasses', 'A2 Molasses', 'B Molasses']));
+
+    rows = rows.concat(pfPanRows('C Station - Pans', fb.C_pans, ['Grain Massecuite', 'B Molasses']));
+    rows = rows.concat(pfHeatxRows('C Station - Crystallizers', fb.C_crystallizers));
+    rows = rows.concat(pfHeatxRows('C Station - Reheater', fb.C_reheaters));
+    rows = rows.concat(pfCenRows('C Station - Centrifugals', fb.C_centrifugals));
+    rows = rows.concat(pfMagmaRows('C Station - C Mingler', fb.C_centrifugals.sugar_stream, fb._c_magma, 'C'));
+    rows = rows.concat(pfMagmaSplitRows('C Station - C Magma Distribution', [
+      ['C Magma to B Footing', fb._c_magma_B_footing],
+      ['C Magma to Remelt', fb._c_magma_to_rmlt],
+    ]));
+    return rows;
+  }
+
+  const PAN_FLOOR_COLUMNS = ['Section', 'Stream', 'Entering/Leaving/Internal', 'Flow lb/hr', 'Pol %', 'Brix %',
+    'Purity', 'Pol lb/hr', 'Brix lb/hr', 'Cu Ft/hr', 'Specific Gravity', 'Temperature', 'Crystal Content'];
+
+  function panFloorMasseSummaryTable(fb, caneTpd) {
+    const grades = fb._pans.map((p) => pfGrade(p.name, 'Pans'));
+    const ft3hr = fb._pans.map((p) => p.massecuite_flow_lb_hr / p.massecuite.density);
+    const totalFt3Hr = ft3hr.reduce((a, b) => a + b, 0);
+    const allFt3Hr = ft3hr.concat([totalFt3Hr]);
+    const headers = ['Metric'].concat(grades.map((g) => `${g} Massecuite`), 'Total');
+    const rows = [
+      ['Cubic Ft / Hr'].concat(allFt3Hr.map((v) => fmt(v, 2))),
+      ['Cubic Ft / Day'].concat(allFt3Hr.map((v) => fmt(v * 24, 2))),
+      ['Cubic Ft / Ton Cane'].concat(allFt3Hr.map((v) => fmt(caneTpd ? v * 24 / caneTpd : 0, 2))),
+    ];
+    return renderTable(headers, rows);
+  }
+
+  function panFloorSteamTable(fb) {
+    const headers = ['Metric'].concat(fb._pans.map((p) => p.name));
+    const metrics = [
+      ['Steam Used (lb/hr)', (p) => fmt(p.steam_flow_lb_hr, 2)],
+      ['Steam Type', (p) => STEAM_TYPES[p.steam_type]],
+      ['Steam Pressure (psia)', (p) => fmt(p.calandria_pressure_psia, 2)],
+      ['Steam Temp (F)', (p) => fmt(p.calandria_T_sat_F, 2)],
+      ['Steam hfg (BTU/lb)', (p) => fmt(p.h_fg_calandria, 2)],
+      ['Massecuite Temp (F)', (p) => fmt(p.massecuite.massecuite_temp, 2)],
+      ['Vapor Evaporated (lb/hr)', (p) => fmt(p.water_evaporated_lb_hr, 2)],
+      ['Vapor Temp (F)', (p) => fmt(p.massecuite.water_bp_surface, 2)],
+      ['Vapor Pressure (psia)', (p) => fmt(p.massecuite.vapor_pressure_psia, 2)],
+      ['Vapor hfg (BTU/lb)', (p) => fmt(p.h_fg_vapor, 2)],
+      ['Heating Surface (ft2)', (p) => fmt(p.heating_surface_ft2, 2)],
+      ['U (Btu/hr.ft2.F)', (p) => fmt(p.U_btu_hr_ft2_F, 2)],
+    ];
+    const rows = metrics.map(([label, fn]) => [label].concat(fb._pans.map(fn)));
+    return renderTable(headers, rows);
+  }
+
+  const PAN_COLS = [
+    { key: 'grade', label: 'Grade', type: 'text' },
+    { key: 'area', label: 'Heating Surface (ft²)', step: 100 },
+    { key: 'vacuum', label: 'Vacuum (in Hg)', step: 0.5 },
+    { key: 'ss', label: 'Supersaturation', step: 0.05 },
+    { key: 'head', label: 'Head (ft)', step: 0.5 },
+    { key: 'masse_brix', label: 'Masse Brix', step: 0.5 },
+    { key: 'ml_purity', label: 'Mother Liquor Purity', step: 1 },
+    { key: 'calandria_psia', label: 'Calandria (psia)', step: 0.5 },
+    { key: 'heat_loss', label: 'Heat Loss Factor', step: 0.01 },
+    { key: 'steam_type', label: 'Steam Type', type: 'select', options: STEAM_TYPES },
+  ];
+  const CEN_COLS = [
+    { key: 'grade', label: 'Grade', type: 'text' },
+    { key: 'mol_brix_out', label: 'Molasses Brix Out', step: 1 },
+    { key: 'purity_rise', label: 'Purity Rise', step: 0.5 },
+    { key: 'sugar_purity', label: 'Sugar Purity', step: 0.1 },
+    { key: 'sugar_moisture', label: 'Sugar Moisture', step: 0.1 },
+    { key: 'sugar_temp', label: 'Sugar Temp', step: 1 },
+    { key: 'molasses_temp', label: 'Molasses Temp', step: 1 },
+  ];
+  const FBDM_PAN_DEFAULTS = [
+    { grade: 'A1', area: 16000, vacuum: 23.5, ss: 1.2, head: 2, masse_brix: 92, ml_purity: 75, calandria_psia: 21.696, heat_loss: 0.02, steam_type: 'V1' },
+    { grade: 'A2', area: 6000, vacuum: 23.5, ss: 1.2, head: 2, masse_brix: 92, ml_purity: 70, calandria_psia: 21.696, heat_loss: 0.02, steam_type: 'V1' },
+    { grade: 'B', area: 7500, vacuum: 25.0, ss: 1.2, head: 2, masse_brix: 94, ml_purity: 52, calandria_psia: 29.696, heat_loss: 0.05, steam_type: 'Exhaust' },
+    { grade: 'Grain', area: 3000, vacuum: 25.5, ss: 1.2, head: 2, masse_brix: 88, ml_purity: 45, calandria_psia: 29.696, heat_loss: 0.05, steam_type: 'Exhaust' },
+    { grade: 'C', area: 12000, vacuum: 26.5, ss: 1.2, head: 2, masse_brix: 95.5, ml_purity: 33, calandria_psia: 21.696, heat_loss: 0.05, steam_type: 'V1' },
+  ];
+  const FBDM_CEN_DEFAULTS = [
+    { grade: 'A1', mol_brix_out: 80.0, purity_rise: 0.0, sugar_purity: 99.7, sugar_moisture: 0.2, sugar_temp: 150, molasses_temp: 145 },
+    { grade: 'A2', mol_brix_out: 80.0, purity_rise: 0.0, sugar_purity: 99.3, sugar_moisture: 0.2, sugar_temp: 150, molasses_temp: 145 },
+    { grade: 'B', mol_brix_out: 82.0, purity_rise: 0.0, sugar_purity: 92.0, sugar_moisture: 5.0, sugar_temp: 150, molasses_temp: 145 },
+    { grade: 'C', mol_brix_out: 82.0, purity_rise: 0.0, sugar_purity: 82.0, sugar_moisture: 5.0, sugar_temp: 150, molasses_temp: 145 },
+  ];
+
+  function buildPanTab() {
+    const section = document.getElementById('tab-pan');
+    if (!PlantState.clar) {
+      section.innerHTML = '<div class="panel"><p class="error">Solve the Clarification tab first -- Pan Floor needs its clarified juice stream.</p></div>';
+      return;
+    }
+
+    section.innerHTML = `
+      <div class="panel">
+        <h2>Pan Floor -- Four Boiling Double Magma</h2>
+        <p class="note">Only the FBDM scheme is implemented so far -- see web/PROGRESS.md Phase 3.</p>
+        <div class="grid">
+          ${inputField('pf-syrup_brix', 'Syrup brix', 65.0, 0.5)}
+          ${inputField('pf-inj_water', 'Injection water temp (°F)', 90.0, 1)}
+          ${inputField('pf-cond_leg', 'Condenser leg ΔT (°F)', 5.0, 0.5)}
+          ${inputField('pf-b_magma_brix', 'B magma brix', 92.0, 0.5)}
+          ${inputField('pf-b_remelt_brix', 'B remelt brix', 65.0, 0.5)}
+          ${inputField('pf-c_magma_brix', 'C magma brix', 92.0, 0.5)}
+          ${inputField('pf-c_remelt_brix', 'C remelt brix', 65.0, 0.5)}
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3 class="section-title">Pans</h3>
+        ${editableRowsTable('pf-pans', PAN_COLS, FBDM_PAN_DEFAULTS)}
+        <h3 class="section-title">Centrifugals</h3>
+        ${editableRowsTable('pf-cens', CEN_COLS, FBDM_CEN_DEFAULTS)}
+      </div>
+
+      <div class="panel">
+        <h3 class="section-title">C Crystallizer / Reheater (low-grade cooling train)</h3>
+        <div class="grid">
+          ${inputField('pf-cryst_temp_out', 'Crystallizer masse out (°F)', 120.0, 1)}
+          ${inputField('pf-cryst_ml_purity_out', 'Crystallizer mother liquor purity out (%)', 30.0, 1)}
+          ${inputField('pf-reheat_temp_out', 'Reheater masse out (°F)', 140.0, 1)}
+        </div>
+        <p class="note">Cooling water fixed 85→105°F, reheat water fixed 150→135°F.</p>
+      </div>
+
+      <div class="panel">
+        <h3 class="section-title">Split fractions</h3>
+        <div class="grid">
+          ${inputField('pf-syrup_to_A1', 'Syrup to A1 pans (%)', 75.0, 1)}
+          ${inputField('pf-syrup_to_A2', 'Syrup to A2 pans (%)', 20.0, 1)}
+          ${inputField('pf-a1_to_A2', 'A1 mol to A2 (%)', 80.0, 1)}
+          ${inputField('pf-a1_to_grain', 'A1 mol to grain (%)', 3.0, 1)}
+          ${inputField('pf-a2_to_grain', 'A2 mol to grain (%)', 0.0, 1)}
+          ${inputField('pf-b_to_grain', 'B mol to grain (%)', 10.0, 1)}
+          ${inputField('pf-b_A1_footing', 'B magma A1 footing (%)', 40.0, 1)}
+          ${inputField('pf-b_A2_footing', 'B magma A2 footing (%)', 40.0, 1)}
+          ${inputField('pf-c_B_footing', 'C magma B footing (%)', 80.0, 1)}
+        </div>
+      </div>
+
+      <p><button class="primary" id="pf-calc">Calculate</button></p>
+      <div id="pf-result"></div>`;
+
+    const resultDiv = section.querySelector('#pf-result');
+
+    section.querySelector('#pf-calc').addEventListener('click', () => {
+      try {
+        const cj = resolveCj();
+        const syrup_brix = parseFloat(section.querySelector('#pf-syrup_brix').value);
+        const syrup = SugarStream.copy(cj);
+        syrup.flow_lb_per_hr = cj.flow_lb_per_hr * cj.brix / syrup_brix;
+        syrup.brix = syrup_brix;
+
+        const panRows = readEditableRows(section, 'pf-pans', PAN_COLS, FBDM_PAN_DEFAULTS.length);
+        const pans = {};
+        panRows.forEach((row) => {
+          pans[row.grade] = new Pan({
+            feed_streams: null,
+            heating_surface_ft2: row.area,
+            inches_vacuum: row.vacuum,
+            supersaturation: row.ss,
+            head_ft: row.head,
+            masse_brix: row.masse_brix,
+            ml_purity: row.ml_purity,
+            calandria_pressure_psia: row.calandria_psia,
+            heat_loss_factor: row.heat_loss,
+            steam_type: STEAM_TYPES.indexOf(row.steam_type),
+            name: `${row.grade} Pans`,
+          });
+        });
+
+        const cenRows = readEditableRows(section, 'pf-cens', CEN_COLS, FBDM_CEN_DEFAULTS.length);
+        const cens = {};
+        cenRows.forEach((row) => {
+          cens[row.grade] = new Centrifugal({
+            massecuite: null,
+            massecuite_flow_lb_hr: 0,
+            target_molasses_brix: row.mol_brix_out,
+            purity_rise: row.purity_rise,
+            sugar_purity: row.sugar_purity,
+            sugar_moisture: row.sugar_moisture,
+            sugar_temp: row.sugar_temp,
+            molasses_temp: row.molasses_temp,
+            name: `${row.grade} Centrifugals`,
+          });
+        });
+
+        const cCrystallizers = new Crystallizer({
+          massecuite_in: null, massecuite_flow_lb_hr: 0,
+          masse_temp_out_deg_F: parseFloat(section.querySelector('#pf-cryst_temp_out').value),
+          ml_purity_out: parseFloat(section.querySelector('#pf-cryst_ml_purity_out').value),
+          water_temp_in_deg_F: 85, water_temp_out_deg_F: 105, name: 'C Crystallizers',
+        });
+        const cReheaters = new Reheater({
+          massecuite_in: null, massecuite_flow_lb_hr: 0,
+          masse_temp_out_deg_F: parseFloat(section.querySelector('#pf-reheat_temp_out').value),
+          water_temp_in_deg_F: 150, water_temp_out_deg_F: 135, name: 'C Reheaters',
+        });
+
+        const panFloor = new FourBoilingDoubleMagma({
+          syrup,
+          A1_pans: pans.A1, A2_pans: pans.A2, B_pans: pans.B, C_pans: pans.C, grain_pans: pans.Grain,
+          A1_centrifugals: cens.A1, A2_centrifugals: cens.A2, B_centrifugals: cens.B, C_centrifugals: cens.C,
+          C_crystallizers: cCrystallizers, C_reheaters: cReheaters,
+          syrup_to_A1_pans_pct: parseFloat(section.querySelector('#pf-syrup_to_A1').value),
+          syrup_to_A2_pans_pct: parseFloat(section.querySelector('#pf-syrup_to_A2').value),
+          a1_mol_to_A2_pct: parseFloat(section.querySelector('#pf-a1_to_A2').value),
+          a1_mol_to_grain_pct: parseFloat(section.querySelector('#pf-a1_to_grain').value),
+          a2_mol_to_grain_pct: parseFloat(section.querySelector('#pf-a2_to_grain').value),
+          b_mol_to_grain_pct: parseFloat(section.querySelector('#pf-b_to_grain').value),
+          b_magma_A1_footing_pct: parseFloat(section.querySelector('#pf-b_A1_footing').value),
+          b_magma_A2_footing_pct: parseFloat(section.querySelector('#pf-b_A2_footing').value),
+          c_magma_B_footing_pct: parseFloat(section.querySelector('#pf-c_B_footing').value),
+          b_magma_brix: parseFloat(section.querySelector('#pf-b_magma_brix').value),
+          c_magma_brix: parseFloat(section.querySelector('#pf-c_magma_brix').value),
+          b_remelt_brix: parseFloat(section.querySelector('#pf-b_remelt_brix').value),
+          c_remelt_brix: parseFloat(section.querySelector('#pf-c_remelt_brix').value),
+          injection_water_temp_F: parseFloat(section.querySelector('#pf-inj_water').value),
+          condenser_leg_temp_drop_F: parseFloat(section.querySelector('#pf-cond_leg').value),
+          iterations: 20,
+        });
+
+        PlantState.pan = panFloor;
+
+        const rawSugar = panFloor.total_raw_sugar;
+        const finalMolasses = panFloor.C_centrifugals.molasses_stream;
+
+        const metrics = `
+          <div class="metrics">
+            <div class="metric"><div class="metric-label">Entering syrup</div><div class="metric-value">${fmt(panFloor.syrup.flow_lb_per_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">Total raw sugar</div><div class="metric-value">${fmt(rawSugar.flow_lb_per_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">Total final molasses</div><div class="metric-value">${fmt(finalMolasses.flow_lb_per_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">Exhaust steam</div><div class="metric-value">${fmt(panFloor.total_exhaust_steam_lb_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">V1 steam</div><div class="metric-value">${fmt(panFloor.total_V1_steam_lb_hr, 0)} lb/hr</div></div>
+          </div>`;
+
+        const condensateTable = renderTable(['Item', 'lb/hr'], [
+          ['Clean condensate (Exhaust steam pans)', fmt(panFloor.clean_condensate, 0)],
+          ['Dirty condensate (V1-V4 steam pans)', fmt(panFloor.dirty_condensate, 0)],
+          ['Total condensate', fmt(panFloor.clean_condensate + panFloor.dirty_condensate, 0)],
+        ]);
+
+        const caneTpd = PlantState.mill ? PlantState.mill.cane_tpd : 0;
+        const masseTable = panFloorMasseSummaryTable(panFloor, caneTpd);
+        const steamTable = panFloorSteamTable(panFloor);
+        const streamTable = renderTable(PAN_FLOOR_COLUMNS, fourBoilingRows(panFloor));
+
+        resultDiv.innerHTML = metrics +
+          '<h3 class="section-title">Massecuite Summary</h3>' + masseTable +
+          '<h3 class="section-title">Steam Consumption</h3>' + steamTable +
+          '<h3 class="section-title">Condensate Return</h3>' + condensateTable +
+          '<h3 class="section-title">Pan Floor Output Table</h3>' + streamTable;
+      } catch (e) {
+        resultDiv.innerHTML = `<p class="error">${e.message}</p>`;
+      }
+    });
+
+    section.querySelector('#pf-calc').click();
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     buildTabs();
     buildSteamTab();
     buildMillTab();
     buildClarTab();
     buildHeatTab();
+    buildPanTab();
     buildTurbTab();
   });
 })();
