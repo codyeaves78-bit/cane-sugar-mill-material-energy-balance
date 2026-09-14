@@ -1,0 +1,67 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>validate</title></head>
+<body>
+<pre id="out">running...</pre>
+<script src="reference.js"></script>
+<script src="../src/iapws97.js"></script>
+<script>
+(function () {
+  const cases = window.REFERENCE_CASES;
+  let worstH = 0, worstS = 0, worstV = 0, worstT = 0;
+  let worstHCase = null, worstTCase = null;
+  let failures = 0;
+  const errors = [];
+
+  for (const c of cases) {
+    let result;
+    try {
+      if (c.kind === 'TP') result = IAPWS97.solve({ T: c.T, P: c.P });
+      else if (c.kind === 'Px') result = IAPWS97.solve({ P: c.P, x: c.x });
+      else if (c.kind === 'Ph') result = IAPWS97.solve({ P: c.P, h: c.h });
+      else if (c.kind === 'Ps') result = IAPWS97.solve({ P: c.P, s: c.s });
+    } catch (e) {
+      failures++;
+      errors.push(`ERROR on ${c.kind} case ${JSON.stringify(c)}: ${e.message}`);
+      continue;
+    }
+
+    if (c.h !== undefined) {
+      const err = Math.abs(result.h - c.h);
+      if (err > worstH) { worstH = err; worstHCase = { c, result }; }
+    }
+    if (c.s !== undefined) worstS = Math.max(worstS, Math.abs(result.s - c.s));
+    if (c.v !== undefined) worstV = Math.max(worstV, Math.abs(result.v - c.v) / c.v);
+    if (c.T !== undefined) {
+      const err = Math.abs(result.T - c.T);
+      if (err > worstT) { worstT = err; worstTCase = { c, result }; }
+    }
+    if (c.x_expected !== undefined && result.x !== undefined) {
+      const err = Math.abs(result.x - c.x_expected);
+      if (err > 0.01) {
+        failures++;
+        errors.push(`QUALITY MISMATCH: ${JSON.stringify(c)} -> got x=${result.x}`);
+      }
+    }
+  }
+
+  const TOL_H = 0.05, TOL_S = 0.0005, TOL_T = 0.01;
+  const pass = failures === 0 && worstH <= TOL_H && worstS <= TOL_S && worstT <= TOL_T;
+
+  const lines = [];
+  lines.push(`Cases checked: ${cases.length}, hard failures: ${failures}`);
+  lines.push(`Max |Delta h| = ${worstH.toFixed(6)} kJ/kg`);
+  lines.push(`Max |Delta s| = ${worstS.toFixed(6)} kJ/kg-K`);
+  lines.push(`Max relative |Delta v| = ${(worstV * 100).toFixed(6)} %`);
+  lines.push(`Max |Delta T| = ${worstT.toFixed(6)} K`);
+  if (worstHCase) lines.push('Worst h case: ' + JSON.stringify(worstHCase.c) + ' -> got h=' + worstHCase.result.h);
+  if (worstTCase) lines.push('Worst T case: ' + JSON.stringify(worstTCase.c) + ' -> got T=' + worstTCase.result.T);
+  errors.slice(0, 20).forEach(e => lines.push(e));
+  lines.push(pass ? 'VALIDATION PASSED' : 'VALIDATION FAILED');
+
+  document.getElementById('out').textContent = lines.join('\n');
+  document.title = pass ? 'PASS' : 'FAIL';
+})();
+</script>
+</body>
+</html>

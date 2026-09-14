@@ -1,0 +1,3140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cane Sugar Mill Balance</title>
+<style>
+:root {
+  --bg: #f7f8fa;
+  --panel: #ffffff;
+  --border: #d8dce1;
+  --text: #1c2833;
+  --muted: #5d6d7e;
+  --accent: #1f4e78;
+  --accent-fg: #ffffff;
+  --input-bg: #ffffff;
+  --table-head: #305496;
+  --table-band: #f2f2f2;
+  --danger: #b03a2e;
+  --ok: #1e8449;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14181d;
+    --panel: #1b2027;
+    --border: #333a44;
+    --text: #e8ecf1;
+    --muted: #9aa7b4;
+    --accent: #4c8dc9;
+    --accent-fg: #0b1117;
+    --input-bg: #11151a;
+    --table-head: #2b3a55;
+    --table-band: #20262e;
+    --danger: #e07a68;
+    --ok: #57c17b;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+}
+
+header {
+  padding: 14px 20px;
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+header h1 { margin: 0; font-size: 18px; }
+header p { margin: 2px 0 0; font-size: 12px; opacity: .85; }
+
+nav#tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+nav#tabs button {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12.5px;
+}
+nav#tabs button.active {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+nav#tabs button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+main { padding: 16px 20px 60px; max-width: 1100px; margin: 0 auto; }
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.panel h2 { margin-top: 0; font-size: 15px; color: var(--accent); }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+input, select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: 13px;
+}
+button.primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+th, td { padding: 6px 8px; border: 1px solid var(--border); text-align: right; }
+th:first-child, td:first-child { text-align: left; }
+thead th { background: var(--table-head); color: #fff; }
+tbody tr:nth-child(even) { background: var(--table-band); }
+
+.placeholder { color: var(--muted); font-style: italic; }
+.error { color: var(--danger); font-size: 13px; }
+.badge-ok { color: var(--ok); font-weight: 600; }
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+.metric {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: var(--bg);
+}
+.metric .metric-label { font-size: 11px; color: var(--muted); }
+.metric .metric-value { font-size: 17px; font-weight: 600; margin-top: 2px; }
+
+.table-wrap { overflow-x: auto; }
+h3.section-title { font-size: 13px; color: var(--accent); margin: 18px 0 8px; }
+
+table.editable input { padding: 3px 5px; font-size: 12.5px; text-align: right; }
+table.editable th, table.editable td { padding: 4px 6px; }
+.checkbox-field { display: flex; align-items: center; gap: 6px; padding-top: 20px; }
+.checkbox-field input { width: auto; }
+.note { color: var(--muted); font-size: 12px; margin: 4px 0 12px; }
+
+</style>
+</head>
+<body>
+<header>
+  <h1>Cane Sugar Mill — Material &amp; Energy Balance</h1>
+  <p>Single-file offline build. See web/PROGRESS.md in the repo for the port roadmap.</p>
+</header>
+<nav id="tabs"></nav>
+<main id="main"></main>
+<script>
+// IAPWS-IF97 steam property engine (subset: Regions 1, 2 and 4 only).
+//
+// This mill never sees pressure above ~900 psig (~6.4 MPa) or temperature
+// above ~800 F (~700 K) -- both are far inside Region 1 (compressed liquid)
+// and Region 2 (superheated vapor), and well below the P <= 16.529 MPa
+// boundary where Region 3 (near-critical) would ever need to be considered.
+// Region 3 and Region 5 are intentionally NOT implemented.
+//
+// Coefficient tables are transcribed from the public IAPWS-IF97 standard
+// ("Revised Release on the IAPWS Industrial Formulation 1997 for the
+// Thermodynamic Properties of Water and Steam", IAPWS, August 2007),
+// cross-checked against the `iapws` Python package (jjgomera/iapws) that
+// the rest of this project's Python code already depends on, so results
+// match to solver tolerance. See web/dev/validate.mjs for the comparison
+// harness against that same Python package.
+//
+// All functions here use SI units (K, MPa, kJ/kg, kJ/kg-K, m^3/kg) to match
+// the standard. English-unit conversion lives in SteamStream (steam_stream.js).
+
+(function (root) {
+  'use strict';
+
+  const R = 0.461526;      // kJ/(kg K)
+  const Tc = 647.096;      // K
+  const Pc = 22.064;       // MPa
+  const Ps_623 = 16.5291642526777; // MPa, PSat(623.15 K) -- our permanent ceiling
+
+  // ---------------------------------------------------------------------
+  // Region 1: compressed / subcooled liquid
+  // ---------------------------------------------------------------------
+
+  const R1_I = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4,
+    5, 8, 8, 21, 23, 29, 30, 31, 32];
+  const R1_J = [-2, -1, 0, 1, 2, 3, 4, 5, -9, -7, -1, 0, 1, 3, -3, 0, 1, 3, 17, -4, 0, 6,
+    -5, -2, 10, -8, -11, -6, -29, -31, -38, -39, -40, -41];
+  const R1_n = [0.14632971213167, -0.84548187169114, -3.756360367204, 3.3855169168385,
+    -0.95791963387872, 0.15772038513228, -0.016616417199501, 0.00081214629983568,
+    0.00028319080123804, -0.00060706301565874, -0.018990068218419, -0.032529748770505,
+    -0.021841717175414, -0.00005283835796993, -0.00047184321073267, -0.00030001780793026,
+    0.000047661393906987, -0.0000044141845330846, -7.2694996297594e-16,
+    -0.000031679644845054, -0.0000028270797985312, -8.5205128120103e-10,
+    -0.0000022425281908, -0.00000065171222895601, -1.4341729937924e-13,
+    -0.00000040516996860117, -1.2734301741641e-9, -1.7424871230634e-10,
+    -6.8762131295531e-19, 1.4478307828521e-20, 2.6335781662795e-23,
+    -1.1947622640071e-23, 1.8228094581404e-24, -9.3537087292458e-26];
+
+  function region1(T, P) {
+    const Tr = 1386 / T;
+    const Pr = P / 16.53;
+    const pi = 7.1 - Pr;
+    const tau = Tr - 1.222;
+    let g = 0, gp = 0, gpp = 0, gt = 0, gtt = 0, gpt = 0;
+    for (let k = 0; k < R1_n.length; k++) {
+      const I = R1_I[k], J = R1_J[k], n = R1_n[k];
+      const piI = Math.pow(pi, I);
+      const tauJ = Math.pow(tau, J);
+      g += n * piI * tauJ;
+      gp += -n * I * Math.pow(pi, I - 1) * tauJ;
+      gpp += n * I * (I - 1) * Math.pow(pi, I - 2) * tauJ;
+      gt += n * J * piI * Math.pow(tau, J - 1);
+      gtt += n * J * (J - 1) * piI * Math.pow(tau, J - 2);
+      gpt += -n * I * J * Math.pow(pi, I - 1) * Math.pow(tau, J - 1);
+    }
+    return {
+      T, P,
+      v: Pr * gp * R * T / P / 1000,
+      h: Tr * gt * R * T,
+      s: R * (Tr * gt - g),
+      region: 1, x: 0,
+    };
+  }
+
+  // Backward1 T(P,h)
+  const B1PH_I = [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 3, 4, 5, 6];
+  const B1PH_J = [0, 1, 2, 6, 22, 32, 0, 1, 2, 3, 4, 10, 32, 10, 32, 10, 32, 32, 32, 32];
+  const B1PH_n = [-238.72489924521, 404.21188637945, 113.49746881718, -5.8457616048039,
+    -0.0001528548241314, -1.0866707695377e-6, -13.391744872602, 43.211039183559,
+    -54.010067170506, 30.535892203916, -6.5964749423638, 0.0093965400878363,
+    1.157364750534e-7, -0.000025858641282073, -4.0644363084799e-9,
+    0.000066456186191635, 8.0670734103027e-11, -9.3477771213947e-13,
+    5.8265442020601e-15, -1.5020185953503e-17];
+
+  function backward1_T_Ph(P, h) {
+    const nu = h / 2500;
+    let T = 0;
+    for (let k = 0; k < B1PH_n.length; k++) {
+      T += B1PH_n[k] * Math.pow(P, B1PH_I[k]) * Math.pow(nu + 1, B1PH_J[k]);
+    }
+    return T;
+  }
+
+  // Backward1 T(P,s)
+  const B1PS_I = [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 4];
+  const B1PS_J = [0, 1, 2, 3, 11, 31, 0, 1, 2, 3, 12, 31, 0, 1, 2, 9, 31, 10, 32, 32];
+  const B1PS_n = [174.78268058307, 34.806930892873, 6.5292584978455, 0.33039981775489,
+    -1.9281382923196e-7, -2.4909197244573e-23, -0.26107636489332, 0.22592965981586,
+    -0.064256463395226, 0.0078876289270526, 3.5672110607366e-10, 1.7332496994895e-24,
+    0.00056608900654837, -0.00032635483139717, 0.000044778286690632,
+    -5.1322156908507e-10, -4.2522657042207e-26, 2.6400441360689e-13,
+    7.8124600459723e-29, -3.0732199903668e-31];
+
+  function backward1_T_Ps(P, s) {
+    const sigma = s;
+    let T = 0;
+    for (let k = 0; k < B1PS_n.length; k++) {
+      T += B1PS_n[k] * Math.pow(P, B1PS_I[k]) * Math.pow(sigma + 2, B1PS_J[k]);
+    }
+    return T;
+  }
+
+  // ---------------------------------------------------------------------
+  // Region 2: superheated / dry saturated vapor
+  // ---------------------------------------------------------------------
+
+  const R2_I = [1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 5, 6, 6, 6, 7, 7, 7,
+    8, 8, 9, 10, 10, 10, 16, 16, 18, 20, 20, 20, 21, 22, 23, 24, 24, 24];
+  const R2_J = [0, 1, 2, 3, 6, 1, 2, 4, 7, 36, 0, 1, 3, 6, 35, 1, 2, 3, 7, 3, 16, 35, 0,
+    11, 25, 8, 36, 13, 4, 10, 14, 29, 50, 57, 20, 35, 48, 21, 53, 39, 26, 40, 58];
+  const R2_n = [-0.0017731742473213, -0.017834862292358, -0.045996013696365,
+    -0.057581259083432, -0.05032527872793, -0.000033032641670203, -0.00018948987516315,
+    -0.0039392777243355, -0.043797295650573, -0.000026674547914087, 2.0481737692309e-8,
+    4.3870667284435e-7, -0.000032277677238570, -0.0015033924542148, -0.040668253562649,
+    -7.8847309559367e-10, 1.2790717852285e-8, 4.8225372718507e-7, 2.2922076337661e-6,
+    -1.6714766451061e-11, -0.0021171472321355, -23.895741934104, -5.905956432427e-18,
+    -1.2621808899101e-6, -0.038946842435739, 1.1256211360459e-11, -8.2311340897998,
+    1.9809712802088e-8, 1.0406965210174e-19, -1.0234747095929e-13, -1.0018179379511e-9,
+    -8.0882908646985e-11, 0.10693031879409, -0.33662250574171, 8.918584535542e-25,
+    3.0629316876232e-13, -0.0000042002467698208, -5.9056029685639e-26,
+    0.0000037826947613457, -1.2768608934681e-15, 7.3087610595061e-29,
+    5.5414715350778e-17, -0.00000094369707241210];
+
+  const R2_cp0_J = [0, 1, -5, -4, -3, -2, -1, 2, 3];
+  const R2_cp0_n = [-9.6927686500217, 10.086655968018, -0.005608791128302,
+    0.071452738081455, -0.40710498223928, 1.4240819171444, -4.383951131945,
+    -0.28408632460772, 0.021268463753307];
+
+  function region2(T, P) {
+    const Tr = 540 / T;
+    const Pr = P;
+
+    // ideal-gas part
+    let go = Math.log(Pr), got = 0, gott = 0;
+    for (let k = 0; k < R2_cp0_n.length; k++) {
+      const J = R2_cp0_J[k], n = R2_cp0_n[k];
+      go += n * Math.pow(Tr, J);
+      got += n * J * Math.pow(Tr, J - 1);
+      gott += n * J * (J - 1) * Math.pow(Tr, J - 2);
+    }
+
+    // residual part
+    const tau = Tr - 0.5;
+    let gr = 0, grp = 0, grt = 0;
+    for (let k = 0; k < R2_n.length; k++) {
+      const I = R2_I[k], J = R2_J[k], n = R2_n[k];
+      const PrI = Math.pow(Pr, I);
+      const tauJ = Math.pow(tau, J);
+      gr += n * PrI * tauJ;
+      grp += n * I * Math.pow(Pr, I - 1) * tauJ;
+      grt += n * J * PrI * Math.pow(tau, J - 1);
+    }
+
+    return {
+      T, P,
+      v: Pr * (1 / Pr + grp) * R * T / P / 1000,
+      h: Tr * (got + grt) * R * T,
+      s: R * (Tr * (got + grt) - (go + gr)),
+      region: 2, x: 1,
+    };
+  }
+
+  // Backward2a/b/c T(P,h)
+  const B2aPH_I = [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 3,
+    3, 4, 4, 4, 5, 5, 5, 6, 6, 7];
+  const B2aPH_J = [0, 1, 2, 3, 7, 20, 0, 1, 2, 3, 7, 9, 11, 18, 44, 0, 2, 7, 36, 38, 40, 42,
+    44, 24, 44, 12, 32, 44, 32, 36, 42, 34, 44, 28];
+  const B2aPH_n = [1089.8952318288, 849.51654495535, -107.81748091826, 33.153654801263,
+    -7.4232016790248, 11.765048724356, 1.844574935579, -4.1792700549624, 6.2478196935812,
+    -17.344563108114, -200.58176862096, 271.96065473796, -455.11318285818, 3091.9688604755,
+    252266.40357872, -0.0061707422868339, -0.31078046629583, 11.670873077107,
+    128127984.04046, -985549096.23276, 2822454697.3002, -3594897141.0703,
+    1722734991.3197, -13551.334240775, 12848734.66465, 1.3865724283226, 235988.32556514,
+    -13105236.545054, 7399.9835474766, -551966.9703006, 3715408.5996233, 19127.72923966,
+    -415351.64835634, -62.459855192507];
+
+  const B2bPH_I = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3,
+    4, 4, 4, 4, 4, 4, 5, 5, 5, 6, 7, 7, 9, 9];
+  const B2bPH_J = [0, 1, 2, 12, 18, 24, 28, 40, 0, 2, 6, 12, 18, 24, 28, 40, 2, 8, 18, 40,
+    1, 2, 12, 24, 2, 12, 18, 24, 28, 40, 18, 24, 40, 28, 2, 28, 1, 40];
+  const B2bPH_n = [1489.5041079516, 743.07798314034, -97.708318797837, 2.4742464705674,
+    -0.63281320016026, 1.1385952129658, -0.47811863648625, 0.0085208123431544,
+    0.93747147377932, 3.3593118604916, 3.3809355601454, 0.16844539671904,
+    0.73875745236695, -0.47128737436186, 0.15020273139707, -0.0021764114219750,
+    -0.021810755324761, -0.10829784403677, -0.046333324635812, 0.000071280351959551,
+    0.00011032831789999, 0.00018955248387902, 0.0030891541160537, 0.0013555504554949,
+    2.8640237477456e-7, -0.000010779857357512, -0.000076462712454814, 0.000014052392818316,
+    -0.000031083814331434, -0.0000010302738212103, 2.821728163504e-7, 1.2704902271945e-6,
+    7.3803353468292e-8, -1.1030139238909e-8, -8.1456365207833e-14, -2.518054568296e-11,
+    -1.7565233969407e-18, 8.6934156344163e-15];
+
+  const B2cPH_I = [-7, -7, -6, -6, -5, -5, -2, -2, -1, -1, 0, 0, 1, 1, 2, 6, 6, 6, 6, 6, 6, 6, 6];
+  const B2cPH_J = [0, 4, 0, 2, 0, 2, 0, 1, 0, 2, 0, 1, 4, 8, 4, 0, 1, 4, 10, 12, 16, 20, 22];
+  const B2cPH_n = [-3236839855.5242, 7326335090.2181, 358250899454.47, -583401318515.90,
+    -10783068217.470, 20825544563.171, 610747.83564516, 859777.22535580, -25745.723604170,
+    31081.088422714, 1208.2315865936, 482.19755109255, 3.7966001272486, -10.842984880077,
+    -0.045364172676660, 1.4559115658698e-13, 1.126159740723e-12, -1.7804982240686e-11,
+    1.2324579690832e-7, -1.1606921130984e-6, 0.000027846367088554, -0.00059270038474176,
+    0.0012918582991878];
+
+  function backward2a_T_Ph(P, h) {
+    const nu = h / 2000 - 2.1;
+    let T = 0;
+    for (let k = 0; k < B2aPH_n.length; k++) T += B2aPH_n[k] * Math.pow(P, B2aPH_I[k]) * Math.pow(nu, B2aPH_J[k]);
+    return T;
+  }
+  function backward2b_T_Ph(P, h) {
+    const nu = h / 2000 - 2.6;
+    const pr = P - 2;
+    let T = 0;
+    for (let k = 0; k < B2bPH_n.length; k++) T += B2bPH_n[k] * Math.pow(pr, B2bPH_I[k]) * Math.pow(nu, B2bPH_J[k]);
+    return T;
+  }
+  function backward2c_T_Ph(P, h) {
+    const nu = h / 2000 - 1.8;
+    const pr = P + 25;
+    let T = 0;
+    for (let k = 0; k < B2cPH_n.length; k++) T += B2cPH_n[k] * Math.pow(pr, B2cPH_I[k]) * Math.pow(nu, B2cPH_J[k]);
+    return T;
+  }
+
+  function hbc_P(P) {
+    return 2652.6571908428 + Math.sqrt((P - 4.5257578905948) / 0.00012809002730136);
+  }
+
+  function backward2_T_Ph(P, h) {
+    let T;
+    if (P <= 4) {
+      T = backward2a_T_Ph(P, h);
+    } else if (P <= 6.546699678) {
+      T = backward2b_T_Ph(P, h);
+    } else {
+      const hf = hbc_P(P);
+      T = h >= hf ? backward2b_T_Ph(P, h) : backward2c_T_Ph(P, h);
+    }
+    if (P <= 22.064) T = Math.max(tSatP(P), T);
+    return T;
+  }
+
+  // Backward2a/b/c T(P,s)
+  const B2aPS_I = [-1.5, -1.5, -1.5, -1.5, -1.5, -1.5, -1.25, -1.25, -1.25, -1.0, -1.0, -1.0,
+    -1.0, -1.0, -1.0, -0.75, -0.75, -0.5, -0.5, -0.5, -0.5, -0.25, -0.25, -0.25, -0.25,
+    0.25, 0.25, 0.25, 0.25, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.75, 0.75, 0.75, 0.75,
+    1.0, 1.0, 1.25, 1.25, 1.5, 1.5];
+  const B2aPS_J = [-24, -23, -19, -13, -11, -10, -19, -15, -6, -26, -21, -17, -16, -9, -8,
+    -15, -14, -26, -13, -9, -7, -27, -25, -11, -6, 1, 4, 8, 11, 0, 1, 5, 6, 10, 14, 16,
+    0, 4, 9, 17, 7, 18, 3, 15, 5, 18];
+  const B2aPS_n = [-392359.83861984, 515265.73827270, 40482.443161048, -321.93790923902,
+    96.961424218694, -22.867846371773, -449429.14124357, -5011.8336020166,
+    0.35684463560015, 44235.335848190, -13673.388811708, 421632.60207864,
+    22516.925837475, 474.42144865646, -149.31130797647, -197811.26320452,
+    -23554.399470760, -19070.616302076, 55375.669883164, 3829.3691437363,
+    -603.91860580567, 1936.3102620331, 4266.0643698610, -5978.0638872718,
+    -704.01463926862, 338.36784107553, 20.862786635187, 0.033834172656196,
+    -0.000043124428414893, 166.53791356412, -139.86292055898, -0.78849547999872,
+    0.072132411753872, -0.0059754839398283, -0.000012141358953904, 2.3227096733871e-7,
+    -10.538463566194, 2.0718925496502, -0.072193155260427, 2.074988708112e-7,
+    -0.018340657911379, 2.9036272348696e-7, 0.21037527893619, 0.00025681239729999,
+    -0.012799002933781, -0.0000082198102652018];
+  function backward2a_T_Ps(P, s) {
+    const sigma = s / 2 - 2;
+    let T = 0;
+    for (let k = 0; k < B2aPS_n.length; k++) T += B2aPS_n[k] * Math.pow(P, B2aPS_I[k]) * Math.pow(sigma, B2aPS_J[k]);
+    return T;
+  }
+
+  const B2bPS_I = [-6, -6, -5, -5, -4, -4, -4, -3, -3, -3, -3, -2, -2, -2, -2, -1, -1, -1,
+    -1, -1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 5, 5, 5];
+  const B2bPS_J = [0, 11, 0, 11, 0, 1, 11, 0, 1, 11, 12, 0, 1, 6, 10, 0, 1, 5, 8, 9, 0, 1, 2,
+    4, 5, 6, 9, 0, 1, 2, 3, 7, 8, 0, 1, 5, 0, 1, 3, 0, 1, 0, 1, 2];
+  const B2bPS_n = [316876.65083497, 20.864175881858, -398593.99803599, -21.816058518877,
+    223697.85194242, -2784.1703445817, 9.9207436071480, -75197.512299157, 2970.8605951158,
+    -3.4406878548526, 0.38815564249115, 17511.295085750, -1423.7112854449, 1.0943803364167,
+    0.89971619308495, -3375.9740098958, 471.62885818355, -1.9188241993679, 0.41078580492196,
+    -0.33465378172097, 1387.0034777505, -406.63326195838, 41.727347159610, 2.1932549434532,
+    -1.0320050009077, 0.35882943516703, 0.0052511453726066, 12.838916450705,
+    -2.8642437219381, 0.56912683664855, -0.099962954584931, -0.0032632037778459,
+    0.00023320922576723, -0.15334809857450, 0.029072288239902, 0.00037534702741167,
+    0.0017296691702411, -0.00038556050844504, -0.000035017712292608, -0.000014566393631492,
+    0.0000056420857267269, 4.1286150074605e-8, -2.0684671118824e-8, 1.6409393674725e-9];
+  function backward2b_T_Ps(P, s) {
+    const sigma = 10 - s / 0.7853;
+    let T = 0;
+    for (let k = 0; k < B2bPS_n.length; k++) T += B2bPS_n[k] * Math.pow(P, B2bPS_I[k]) * Math.pow(sigma, B2bPS_J[k]);
+    return T;
+  }
+
+  const B2cPS_I = [-2, -2, -1, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5,
+    6, 6, 7, 7, 7, 7, 7];
+  const B2cPS_J = [0, 1, 0, 0, 1, 2, 3, 0, 1, 3, 4, 0, 1, 2, 0, 1, 5, 0, 1, 4, 0, 1, 2, 0,
+    1, 0, 1, 3, 4, 5];
+  const B2cPS_n = [909.68501005365, 2404.5667088420, -591.62326387130, 541.45404128074,
+    -270.98308411192, 979.76525097926, -469.66772959435, 14.399274604723, -19.104204230429,
+    5.3299167111971, -21.252975375934, -0.31147334413760, 0.60334840894623,
+    -0.042764839702509, 0.0058185597255259, -0.014597008284753, 0.0056631175631027,
+    -0.000076155864584577, 0.00022440342919332, -0.000012561095013413, 6.3323132660934e-7,
+    -0.0000020541989675375, 3.6405370390082e-8, -2.9759897789215e-9, 1.0136618529763e-8,
+    5.9925719692351e-12, -2.0677870105164e-11, -2.0874278181886e-11, 1.0162166825089e-10,
+    -1.6429828281347e-10];
+  function backward2c_T_Ps(P, s) {
+    const sigma = 2 - s / 2.9251;
+    let T = 0;
+    for (let k = 0; k < B2cPS_n.length; k++) T += B2cPS_n[k] * Math.pow(P, B2cPS_I[k]) * Math.pow(sigma, B2cPS_J[k]);
+    return T;
+  }
+
+  function backward2_T_Ps(P, s) {
+    let T;
+    if (P <= 4) T = backward2a_T_Ps(P, s);
+    else if (s >= 5.85) T = backward2b_T_Ps(P, s);
+    else T = backward2c_T_Ps(P, s);
+    if (P <= 22.064) T = Math.max(tSatP(P), T);
+    return T;
+  }
+
+  // ---------------------------------------------------------------------
+  // Region 4: saturation curve (Eq 30 / its P<->T inverse)
+  // ---------------------------------------------------------------------
+
+  const SAT_n = [0, 1167.0521452767, -724213.16703206, -17.073846940092, 12020.824702470,
+    -3232555.0322333, 14.915108613530, -4823.2657361591, 405113.40542057,
+    -0.23855557567849, 650.17534844798];
+
+  function pSatT(T) {
+    const theta = T + SAT_n[9] / (T - SAT_n[10]);
+    const A = theta * theta + SAT_n[1] * theta + SAT_n[2];
+    const B = SAT_n[3] * theta * theta + SAT_n[4] * theta + SAT_n[5];
+    const C = SAT_n[6] * theta * theta + SAT_n[7] * theta + SAT_n[8];
+    return Math.pow(2 * C / (-B + Math.sqrt(B * B - 4 * A * C)), 4);
+  }
+
+  function tSatP(P) {
+    const beta = Math.pow(P, 0.25);
+    const E = beta * beta + SAT_n[3] * beta + SAT_n[6];
+    const F = SAT_n[1] * beta * beta + SAT_n[4] * beta + SAT_n[7];
+    const G = SAT_n[2] * beta * beta + SAT_n[5] * beta + SAT_n[8];
+    const D = 2 * G / (-F - Math.sqrt(F * F - 4 * E * G));
+    return (SAT_n[10] + D - Math.sqrt(Math.pow(SAT_n[10] + D, 2) - 4 * (SAT_n[9] + SAT_n[10] * D))) / 2;
+  }
+
+  function region4(P, x) {
+    const T = tSatP(P);
+    const liq = region1(T, P);
+    const vap = region2(T, P);
+    return {
+      T, P, x,
+      v: liq.v + x * (vap.v - liq.v),
+      h: liq.h + x * (vap.h - liq.h),
+      s: liq.s + x * (vap.s - liq.s),
+      region: 4,
+    };
+  }
+
+  // ---------------------------------------------------------------------
+  // Newton refinement: the backward equations are already accurate to a
+  // few mK, but a couple of Newton steps on the forward equation tighten
+  // that further and match the Python `iapws` reference more closely.
+  // ---------------------------------------------------------------------
+
+  function refineByH(regionFn, P, h, T0) {
+    let T = T0;
+    for (let i = 0; i < 3; i++) {
+      const dT = 0.01;
+      const f = regionFn(T, P).h - h;
+      const fp = (regionFn(T + dT, P).h - regionFn(T - dT, P).h) / (2 * dT);
+      if (!isFinite(fp) || fp === 0) break;
+      const step = f / fp;
+      T -= step;
+      if (Math.abs(step) < 1e-8) break;
+    }
+    return T;
+  }
+
+  function refineByS(regionFn, P, s, T0) {
+    let T = T0;
+    for (let i = 0; i < 3; i++) {
+      const dT = 0.01;
+      const f = regionFn(T, P).s - s;
+      const fp = (regionFn(T + dT, P).s - regionFn(T - dT, P).s) / (2 * dT);
+      if (!isFinite(fp) || fp === 0) break;
+      const step = f / fp;
+      T -= step;
+      if (Math.abs(step) < 1e-8) break;
+    }
+    return T;
+  }
+
+  // ---------------------------------------------------------------------
+  // Public solver: mirrors iapws.IAPWS97's flexible 2-property input,
+  // restricted to the P <= Ps_623 (~16.53 MPa / ~2398 psia) envelope this
+  // mill always operates within, and to Regions 1/2/4.
+  // ---------------------------------------------------------------------
+
+  function assertInRange(P) {
+    if (P < 0.000611212677444 || P > Ps_623) {
+      throw new Error(`IAPWS97: pressure ${P} MPa is outside the supported 0.000611-16.53 MPa range (Regions 1/2/4 only)`);
+    }
+  }
+
+  function fromTP(T, P) {
+    assertInRange(P);
+    const Tsat = tSatP(P);
+    return T <= Tsat ? region1(T, P) : region2(T, P);
+  }
+
+  function fromPh(P, h) {
+    assertInRange(P);
+    const Tsat = tSatP(P);
+    const h14 = region1(Tsat, P).h;
+    const h24 = region2(Tsat, P).h;
+    if (h <= h14) {
+      const T = refineByH(region1, P, h, backward1_T_Ph(P, h));
+      return region1(T, P);
+    } else if (h < h24) {
+      const x = (h - h14) / (h24 - h14);
+      return region4(P, x);
+    } else {
+      const T = refineByH(region2, P, h, backward2_T_Ph(P, h));
+      return region2(T, P);
+    }
+  }
+
+  function fromPs(P, s) {
+    assertInRange(P);
+    const Tsat = tSatP(P);
+    const s14 = region1(Tsat, P).s;
+    const s24 = region2(Tsat, P).s;
+    if (s <= s14) {
+      const T = refineByS(region1, P, s, backward1_T_Ps(P, s));
+      return region1(T, P);
+    } else if (s < s24) {
+      const x = (s - s14) / (s24 - s14);
+      return region4(P, x);
+    } else {
+      const T = refineByS(region2, P, s, backward2_T_Ps(P, s));
+      return region2(T, P);
+    }
+  }
+
+  function fromPx(P, x) {
+    assertInRange(P);
+    return region4(P, x);
+  }
+
+  function fromTx(T, x) {
+    const P = pSatT(T);
+    return region4(P, x);
+  }
+
+  function solve(kwargs) {
+    const { T, P, h, s, x } = kwargs;
+    if (T !== undefined && P !== undefined) return fromTP(T, P);
+    if (P !== undefined && h !== undefined) return fromPh(P, h);
+    if (P !== undefined && s !== undefined) return fromPs(P, s);
+    if (P !== undefined && x !== undefined) return fromPx(P, x);
+    if (T !== undefined && x !== undefined) return fromTx(T, x);
+    throw new Error('IAPWS97.solve: pass exactly one supported pair of {T,P,h,s,x} (TP, Ph, Ps, Px, Tx)');
+  }
+
+  const IAPWS97 = { solve, pSatT, tSatP, region1, region2, region4, R, Tc, Pc, Ps_623 };
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = IAPWS97;
+  } else {
+    root.IAPWS97 = IAPWS97;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// English-unit wrapper around IAPWS97, mirroring Python's SteamStream class
+// (SteamStream.py) property-for-property so the rest of the JS port reads
+// exactly like the Python domain classes it's replacing.
+//
+// Pass any 2 of {T (F), P (psia), h (BTU/lb), s (BTU/lb-R), x (0-1)}.
+
+(function (root) {
+  'use strict';
+
+  const IAPWS97 = (typeof module !== 'undefined' && module.exports) ? require('./iapws97.js') : root.IAPWS97;
+
+  const MPA_PER_PSIA = 0.00689476;
+  const KJKG_PER_BTULB = 2.326;
+  const KJKGK_PER_BTULBR = 4.1868;
+  const M3KG_PER_FT3LB = 1 / 16.0185; // ft3/lb -> m3/kg
+
+  const fToK = (f) => (f - 32) * 5 / 9 + 273.15;
+  const kToF = (k) => (k - 273.15) * 9 / 5 + 32;
+  const psiaToMpa = (p) => p * MPA_PER_PSIA;
+  const mpaToPsia = (p) => p / MPA_PER_PSIA;
+  const btuLbToKjKg = (h) => h * KJKG_PER_BTULB;
+  const kjKgToBtuLb = (h) => h / KJKG_PER_BTULB;
+  const btuLbRToKjKgK = (s) => s * KJKGK_PER_BTULBR;
+  const kjKgKToBtuLbR = (s) => s / KJKGK_PER_BTULBR;
+  const m3KgToFt3Lb = (v) => v / M3KG_PER_FT3LB;
+
+  class SteamStream {
+    constructor({ T, P, h, s, x, flow_lb_per_hr = 0 } = {}) {
+      this.flow_lb_per_hr = flow_lb_per_hr;
+      this._definingParams = { T, P, h, s, x };
+      this._state = SteamStream._buildState({ T, P, h, s, x });
+    }
+
+    static _buildState({ T, P, h, s, x }) {
+      const kwargs = {};
+      if (T !== undefined) kwargs.T = fToK(T);
+      if (P !== undefined) kwargs.P = psiaToMpa(P);
+      if (h !== undefined) kwargs.h = btuLbToKjKg(h);
+      if (s !== undefined) kwargs.s = btuLbRToKjKgK(s);
+      if (x !== undefined) kwargs.x = x;
+      return IAPWS97.solve(kwargs);
+    }
+
+    update({ T, P, h, s, x } = {}) {
+      this._state = SteamStream._buildState({ T, P, h, s, x });
+    }
+
+    get T() { return kToF(this._state.T); }
+    get P() { return mpaToPsia(this._state.P); }
+    get h() { return kjKgToBtuLb(this._state.h); }
+    get s() { return kjKgKToBtuLbR(this._state.s); }
+    get x() { return this._state.x; }
+    get v() { return m3KgToFt3Lb(this._state.v); }
+    get rho() { return 1 / this.v; }
+
+    get h_fg() {
+      const satLiq = IAPWS97.solve({ P: this._state.P, x: 0 });
+      const satVap = IAPWS97.solve({ P: this._state.P, x: 1 });
+      return kjKgToBtuLb(satVap.h - satLiq.h);
+    }
+
+    get is_superheated() {
+      const satVap = IAPWS97.solve({ P: this._state.P, x: 1 });
+      const satTempF = kToF(satVap.T);
+      return this.T > satTempF + 0.01;
+    }
+
+    properties() {
+      return {
+        flow_lb_per_hr: this.flow_lb_per_hr,
+        T: this.T, P: this.P, h: this.h, s: this.s, x: this.x,
+        v: this.v, rho: this.rho, h_fg: this.h_fg,
+        is_superheated: this.is_superheated,
+      };
+    }
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = SteamStream;
+  } else {
+    root.SteamStream = SteamStream;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// Port of SugarStream.py + sugar_stream_properties.py. A generic sugar
+// solution stream (brix/purity/flow/temp/pressure/level) used throughout the
+// mill balance (mixed juice, clarified juice, syrup, massecuite, etc). Fast
+// polynomial correlations are used here (not IAPWS97) for BPE/latent
+// heat/sat-temp, matching the Python source's own choice for speed over the
+// 1-60 psia range these correlations were fitted to.
+
+(function (root) {
+  'use strict';
+
+  function bpeBrix(brix) {
+    return 4.266667 * brix / (100 - brix);
+  }
+
+  function bpeHead(lvl, brix, tVap) {
+    const brixPoly = (
+      0.99991
+      + 0.0038008 * brix
+      + 0.000012662 * brix ** 2
+      + 0.00000009596 * brix ** 3
+    );
+    const tempPoly = (
+      5.314
+      - 0.07135 * tVap
+      + 0.00033908 * tVap ** 2
+      - 0.00000055728 * tVap ** 3
+    );
+    let bpeCalc = lvl * 6 * brixPoly * tempPoly;
+    if (bpeCalc < 1) bpeCalc = 1;
+    return bpeCalc;
+  }
+
+  function satSteamTemp(pPsia) {
+    // Only valid for pressure 1-60 psia.
+    const A = 6.239238;
+    const B = 2988.801361;
+    const C = 377.305590;
+    return B / (A - Math.log10(pPsia)) - C;
+  }
+
+  function bpeTotal(lvl, brix, pVapPsia) {
+    const tVap = satSteamTemp(pVapPsia);
+    return bpeBrix(brix) + bpeHead(lvl, brix, tVap);
+  }
+
+  function getLatentHeat(pPsia) {
+    // Only valid for psia 1-60.
+    const temp = satSteamTemp(pPsia);
+    return -0.00000152231563 * temp ** 3 + 0.000504774867 * temp ** 2 - 0.634291695987 * temp + 1096.29;
+  }
+
+  function getCp(brix) {
+    return 0.9964 - 0.005656 * brix;
+  }
+
+  function specificGravity(brix) {
+    // Specific gravity of a sugar solution, at 68 deg F.
+    return (
+      62.2511
+      + 0.24081 * brix
+      + 0.0007902404 * brix ** 2
+      + 0.00000423954 * brix ** 3
+      - 0.00000001657193 * brix ** 4
+    ) / 62.4;
+  }
+
+  let _count = 0;
+
+  class SugarStream {
+    constructor({ brix = 0, purity = 0, flow_lb_per_hr = 0, temp_deg_F = 90, pressure_psia = 14.7, level_ft = 0 } = {}) {
+      _count += 1;
+      this.stream_id = _count;
+      this.brix = brix;
+      this.purity = purity;
+      this.flow_lb_per_hr = flow_lb_per_hr;
+      this.temp_deg_F = temp_deg_F;
+      this.pressure_psia = pressure_psia;
+      this.level_ft = level_ft;
+    }
+
+    get pol() {
+      return (this.brix > 0 && this.purity > 0) ? this.purity * this.brix / 100 : 0;
+    }
+
+    get boiling_point_elevation_deg_F() {
+      return this.brix > 0 ? bpeTotal(this.level_ft, this.brix, this.pressure_psia) : 0;
+    }
+
+    get cp_btu_per_lb_deg_F() {
+      return this.brix > 0 ? getCp(this.brix) : 1;
+    }
+
+    get specific_gravity() {
+      return this.brix > 0 ? specificGravity(this.brix) : 1;
+    }
+
+    get cu_ft_hr() {
+      return this.flow_lb_per_hr / (62.4 * this.specific_gravity);
+    }
+
+    get latent_heat_btu_per_lb() {
+      return this.pressure_psia > 0 ? getLatentHeat(this.pressure_psia) : 0;
+    }
+
+    get vapor_saturation_temp_deg_F() {
+      return this.pressure_psia > 0 ? satSteamTemp(this.pressure_psia) : 0;
+    }
+
+    get solids_flow() {
+      return this.brix * this.flow_lb_per_hr / 100;
+    }
+
+    get pol_flow() {
+      return this.pol * this.flow_lb_per_hr / 100;
+    }
+
+    // Sets the current temp to the vapor boiling temp + boiling point
+    // elevation, useful in evaporator calculations.
+    current_temp_to_bpe_plus_vapor_temp() {
+      this.temp_deg_F = this.vapor_saturation_temp_deg_F + this.boiling_point_elevation_deg_F;
+    }
+
+    // A quick transform into syrup, convenient for clarified juice --> syrup
+    // for Pan Floor calcs.
+    evaporate(new_brix = 65, new_temp = 140) {
+      const currentSolids = this.solids_flow;
+      const newFlow = 100 / new_brix * currentSolids;
+      this.flow_lb_per_hr = newFlow;
+      this.brix = new_brix;
+      this.temp_deg_F = new_temp;
+    }
+
+    properties() {
+      return {
+        stream_id: this.stream_id,
+        brix: this.brix,
+        purity: this.purity,
+        flow_lb_per_hr: this.flow_lb_per_hr,
+        temp_deg_F: this.temp_deg_F,
+        pressure_psia: this.pressure_psia,
+        level_ft: this.level_ft,
+        pol: this.pol,
+        boiling_point_elevation_deg_F: this.boiling_point_elevation_deg_F,
+        cp_btu_per_lb_deg_F: this.cp_btu_per_lb_deg_F,
+        specific_gravity: this.specific_gravity,
+        cu_ft_hr: this.cu_ft_hr,
+        latent_heat_btu_per_lb: this.latent_heat_btu_per_lb,
+        vapor_saturation_temp_deg_F: this.vapor_saturation_temp_deg_F,
+        solids_flow: this.solids_flow,
+        pol_flow: this.pol_flow,
+      };
+    }
+
+    static copy(stream, overrides = {}) {
+      return new SugarStream(Object.assign({
+        brix: stream.brix,
+        purity: stream.purity,
+        flow_lb_per_hr: stream.flow_lb_per_hr,
+        temp_deg_F: stream.temp_deg_F,
+        pressure_psia: stream.pressure_psia,
+        level_ft: stream.level_ft,
+      }, overrides));
+    }
+  }
+
+  SugarStream._properties = { bpeBrix, bpeHead, satSteamTemp, bpeTotal, getLatentHeat, getCp, specificGravity };
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = SugarStream;
+  } else {
+    root.SugarStream = SugarStream;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// Port of Bagasse.py — bagasse composition + GCV (gross calorific value).
+
+(function (root) {
+  'use strict';
+
+  class Bagasse {
+    constructor({ moisture_pct, brix_pct, pol_pct, ash_pct, flowrate_lb_hr }) {
+      this.moisture_pct = moisture_pct;
+      this.brix_pct = brix_pct;
+      this.pol_pct = pol_pct;
+      this.ash_pct = ash_pct;
+      this.flowrate_lb_hr = flowrate_lb_hr;
+    }
+
+    get fiber_pct() {
+      return 100 - this.moisture_pct - this.brix_pct;
+    }
+
+    get gcv() {
+      const M = this.moisture_pct;
+      const A = this.ash_pct;
+      const B = this.brix_pct;
+      return (19605 - 196.05 * M - 196.05 * A - 31.14 * B) * 0.4299;
+    }
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = Bagasse;
+  } else {
+    root.Bagasse = Bagasse;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// Port of MillFloor.py — mill floor material balance for a counter-current
+// cane milling train. All mass balance calculations run in the constructor;
+// results are stored as instance properties, mirroring the Python class.
+
+(function (root) {
+  'use strict';
+
+  const SugarStream = (typeof module !== 'undefined' && module.exports) ? require('./sugar_stream.js') : root.SugarStream;
+  const Bagasse = (typeof module !== 'undefined' && module.exports) ? require('./bagasse.js') : root.Bagasse;
+
+  class MillFloor {
+    constructor({
+      cane_tpd,
+      cane_pol_pct,
+      cane_fiber_pct,
+      imbibition_pct_on_cane,
+      bagasse_pol_pct,
+      last_roll_purity,
+      bagasse_moisture_pct,
+      mix_juice_purity,
+      number_of_mills,
+      juice_temp_F = 90.0,
+      bagasse_ash_pct = 2.0,
+      mill_1_fiber_rise_load_fraction = 0.35,
+      name = 'Mill Floor',
+    }) {
+      this.name = name;
+      this.cane_tpd = cane_tpd;
+      this.cane_tph = this.cane_tpd / 24;
+      this.cane_lb_hr = this.cane_tpd * 2000 / 24;
+      this.cane_pol_pct = cane_pol_pct;
+      this.cane_fiber_pct = cane_fiber_pct;
+      this.imbibition_pct_on_cane = imbibition_pct_on_cane;
+      this.imbibition_lb_hr = this.imbibition_pct_on_cane / 100 * this.cane_lb_hr;
+      this.imbibition_tph = this.imbibition_lb_hr / 2000;
+      this.bagasse_pol_pct = bagasse_pol_pct;
+      this.last_roll_purity = last_roll_purity;
+      this.bagasse_moisture_pct = bagasse_moisture_pct;
+      this.bagasse_ash_pct = bagasse_ash_pct;
+      this.mix_juice_purity = mix_juice_purity;
+      this.number_of_mills = number_of_mills;
+      this.juice_temp_F = juice_temp_F;
+      this.mill_1_fiber_rise_load_fraction = mill_1_fiber_rise_load_fraction;
+
+      // -- Imbibition --------------------------------------------------------
+      const imb_tpd = cane_tpd * imbibition_pct_on_cane / 100;
+      const imb_gpm = imb_tpd * 2000 / 24 / 60 / 8.3;
+
+      // -- Bagasse -------------------------------------------------------------
+      const bag_brix_pct = bagasse_pol_pct / last_roll_purity * 100;
+      const bag_fiber_pct = 100 - bag_brix_pct - bagasse_moisture_pct;
+      const bag_tpd = cane_tpd * cane_fiber_pct / bag_fiber_pct;
+
+      // -- Mixed Juice -----------------------------------------------------
+      const mix_juice_tpd = cane_tpd + imb_tpd - bag_tpd;
+      const tons_pol_juice = cane_tpd * cane_pol_pct / 100 - bag_tpd * bagasse_pol_pct / 100;
+      const tons_brix_juice = tons_pol_juice * 100 / mix_juice_purity;
+      const mix_juice_brix = tons_brix_juice / mix_juice_tpd * 100;
+      const mix_juice_pol = mix_juice_brix * mix_juice_purity / 100;
+      const mix_juice_lb_hr = mix_juice_tpd / 24 * 2000;
+
+      // -- Cane (back-calculated brix and moisture) -------------------------
+      const cane_brix_pct = (tons_brix_juice + bag_tpd * bag_brix_pct / 100) / cane_tpd * 100;
+      const cane_moist_pct = 100 - cane_brix_pct - cane_fiber_pct;
+      this.cane_brix_pct = cane_brix_pct;
+      this.cane_moist_pct = cane_moist_pct;
+
+      // -- Mill extraction ---------------------------------------------------
+      this.mill_extraction_pct = tons_pol_juice / (cane_tpd * cane_pol_pct / 100) * 100;
+      this.imbibition_gpm = imb_gpm;
+
+      // -- Per-mill intermediate flows (for maceration pump sizing) ----------
+      const tons_fiber = cane_tpd * cane_fiber_pct / 100;
+      const fib_change = bag_fiber_pct - cane_fiber_pct;
+      const mill_1_bag_fib = cane_fiber_pct + mill_1_fiber_rise_load_fraction * fib_change;
+      const fib_step = (bag_fiber_pct - mill_1_bag_fib) / Math.max(number_of_mills - 1, 1);
+
+      const fiber_list = [mill_1_bag_fib];
+      for (let i = 0; i < number_of_mills - 1; i++) {
+        fiber_list.push(fiber_list[i] + fib_step);
+      }
+
+      const bag_flows = fiber_list.map((fib) => tons_fiber / (fib / 100));
+      const j1 = cane_tpd - bag_flows[0];
+      const j2 = mix_juice_tpd - j1;
+      const juice_flows = [j1, j2];
+      for (let i = 0; i < number_of_mills - 2; i++) {
+        juice_flows.push(juice_flows[i + 1] - bag_flows[i] + bag_flows[i + 1]);
+      }
+
+      const mill_balances = [];
+      for (let idx = 0; idx < number_of_mills; idx++) {
+        const mill_num = idx + 1;
+        const bag_in = idx === 0 ? cane_tpd : bag_flows[idx - 1];
+        const bag_out = bag_flows[idx];
+        const juice_out = juice_flows[idx];
+
+        let mac_in, mac_src;
+        if (mill_num === 1) {
+          mac_in = 0.0; mac_src = 'None';
+        } else if (mill_num === number_of_mills) {
+          mac_in = imb_tpd; mac_src = 'Imbibition';
+        } else {
+          mac_in = juice_flows[idx + 1];
+          mac_src = `Mill ${mill_num + 1} maceration`;
+        }
+
+        const dest = mill_num <= 2 ? 'To process' : `Mill ${mill_num - 1} maceration`;
+        mill_balances.push({
+          mill: mill_num,
+          bagasse_in_tpd: bag_in,
+          mac_in_tpd: mac_in,
+          mac_in_source: mac_src,
+          bagasse_out_tpd: bag_out,
+          juice_out_tpd: juice_out,
+          juice_out_dest: dest,
+        });
+      }
+
+      this.mill_balances = mill_balances;
+
+      // -- Mixed juice output --------------------------------------------------
+      this.mixed_juice_stream = new SugarStream({
+        brix: mix_juice_brix,
+        purity: mix_juice_purity,
+        flow_lb_per_hr: mix_juice_lb_hr,
+        temp_deg_F: juice_temp_F,
+        pressure_psia: 14.7,
+        level_ft: 0,
+      });
+
+      // -- Bagasse output --------------------------------------------------
+      this.bagasse_stream = new Bagasse({
+        moisture_pct: bagasse_moisture_pct,
+        brix_pct: bag_brix_pct,
+        pol_pct: bagasse_pol_pct,
+        ash_pct: bagasse_ash_pct,
+        flowrate_lb_hr: bag_tpd / 24 * 2000,
+      });
+    }
+
+    get balance_check() {
+      const mj = this.mixed_juice_stream;
+      const bag = this.bagasse_stream;
+
+      const mj_tph = mj.flow_lb_per_hr / 2000;
+      const mj_brix_tph = mj.solids_flow / 2000;
+      const mj_pol_tph = mj.pol_flow / 2000;
+      const mj_moist_tph = mj_tph - mj_brix_tph;
+
+      const bag_tph = bag.flowrate_lb_hr / 2000;
+      const bag_brix_tph = bag_tph * bag.brix_pct / 100;
+      const bag_pol_tph = bag_tph * bag.pol_pct / 100;
+      const bag_fiber_tph = bag_tph * bag.fiber_pct / 100;
+      const bag_moist_tph = bag_tph * bag.moisture_pct / 100;
+
+      const total_in = this.cane_tph + this.imbibition_tph;
+      const total_out = mj_tph + bag_tph;
+
+      const pol_in = this.cane_tph * this.cane_pol_pct / 100;
+      const pol_out = mj_pol_tph + bag_pol_tph;
+
+      const brix_in = this.cane_tph * this.cane_brix_pct / 100;
+      const brix_out = mj_brix_tph + bag_brix_tph;
+
+      const fiber_in = this.cane_tph * this.cane_fiber_pct / 100;
+      const fiber_out = bag_fiber_tph;
+
+      const water_in = this.cane_tph * this.cane_moist_pct / 100 + this.imbibition_tph;
+      const water_out = mj_moist_tph + bag_moist_tph;
+
+      return {
+        total: { in_tph: total_in, out_tph: total_out, diff_tph: total_in - total_out },
+        pol: { in_tph: pol_in, out_tph: pol_out, diff_tph: pol_in - pol_out },
+        brix: { in_tph: brix_in, out_tph: brix_out, diff_tph: brix_in - brix_out },
+        fiber: { in_tph: fiber_in, out_tph: fiber_out, diff_tph: fiber_in - fiber_out },
+        water: { in_tph: water_in, out_tph: water_out, diff_tph: water_in - water_out },
+      };
+    }
+
+    // Stream component flows (TPH) as data: { rows, in_tot, out_tot }.
+    _stream_table_rows() {
+      const mj = this.mixed_juice_stream;
+      const bag = this.bagasse_stream;
+
+      const mj_tph = mj.flow_lb_per_hr / 2000;
+      const mj_brix_tph = mj.solids_flow / 2000;
+      const mj_pol_tph = mj.pol_flow / 2000;
+      const mj_water_tph = mj_tph - mj_brix_tph;
+
+      const bag_tph = bag.flowrate_lb_hr / 2000;
+      const bag_pol_tph = bag_tph * bag.pol_pct / 100;
+      const bag_brix_tph = bag_tph * bag.brix_pct / 100;
+      const bag_fiber_tph = bag_tph * bag.fiber_pct / 100;
+      const bag_water_tph = bag_tph * bag.moisture_pct / 100;
+
+      const cane_pol_tph = this.cane_tph * this.cane_pol_pct / 100;
+      const cane_brix_tph = this.cane_tph * this.cane_brix_pct / 100;
+      const cane_fiber_tph = this.cane_tph * this.cane_fiber_pct / 100;
+      const cane_water_tph = this.cane_tph * this.cane_moist_pct / 100;
+
+      const rows = [
+        ['Cane', 'In', this.cane_tph, cane_pol_tph, cane_brix_tph, cane_fiber_tph, cane_water_tph],
+        ['Imbibition', 'In', this.imbibition_tph, 0.0, 0.0, 0.0, this.imbibition_tph],
+        ['Mixed Juice', 'Out', mj_tph, mj_pol_tph, mj_brix_tph, 0.0, mj_water_tph],
+        ['Bagasse', 'Out', bag_tph, bag_pol_tph, bag_brix_tph, bag_fiber_tph, bag_water_tph],
+      ];
+
+      const in_tot = [0, 0, 0, 0, 0];
+      const out_tot = [0, 0, 0, 0, 0];
+      for (const [, direction, ...vals] of rows) {
+        const totals = direction === 'In' ? in_tot : out_tot;
+        vals.forEach((v, i) => { totals[i] += v; });
+      }
+      return { rows, in_tot, out_tot };
+    }
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = MillFloor;
+  } else {
+    root.MillFloor = MillFloor;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// Port of Clarification.py — clarification section material balance for a
+// single-clarifier cane sugar factory. All mass balance calculations run in
+// the constructor; the clarified juice output is a SugarStream so this unit
+// can chain directly into juice heating / evaporation / pan floor.
+
+(function (root) {
+  'use strict';
+
+  const SugarStream = (typeof module !== 'undefined' && module.exports) ? require('./sugar_stream.js') : root.SugarStream;
+
+  function specificGravity(brix) {
+    return (
+      62.2511
+      + 0.24081 * brix
+      + 0.0007902404 * brix ** 2
+      + 0.00000423954 * brix ** 3
+      - 0.00000001657193 * brix ** 4
+    ) / 62.4;
+  }
+
+  function getCp(brix) {
+    return 0.9964 - 0.005656 * brix;
+  }
+
+  class Clarification {
+    constructor({
+      mixed_juice_stream,
+      cane_tpd,
+      filter_wash_water_pct_on_cane,
+      filter_cake_pct_on_cane,
+      filter_cake_pol_pct,
+      clarified_juice_purity,
+      limed_juice_cold_temp_f = 85.0,
+      limed_juice_hot_temp_f = 220.0,
+      clarified_juice_temp_f = 205.0,
+      lime_lb_per_ton_cane = 1.3,
+      lime_baume = 10,
+      polymer_lb_per_ton_cane = 0.045,
+      polymer_conc_ppm = 5000,
+      clarifier_underflow_pct_cane = 20,
+      name = 'Clarification',
+    }) {
+      this.name = name;
+      this.cane_tpd = cane_tpd;
+      this.filter_wash_water_pct_on_cane = filter_wash_water_pct_on_cane;
+      this.filter_cake_pct_on_cane = filter_cake_pct_on_cane;
+      this.filter_cake_pol_pct = filter_cake_pol_pct;
+      this.clarified_juice_purity = clarified_juice_purity;
+      this.limed_juice_cold_temp_f = limed_juice_cold_temp_f;
+      this.limed_juice_hot_temp_f = limed_juice_hot_temp_f;
+      this.clarified_juice_temp_f = clarified_juice_temp_f;
+      this.lime_lb_per_ton_cane = lime_lb_per_ton_cane;
+      this.lime_baume = lime_baume;
+      this.polymer_lb_per_ton_cane = polymer_lb_per_ton_cane;
+      this.polymer_conc_ppm = polymer_conc_ppm;
+      this.clarifier_underflow_pct_cane = clarifier_underflow_pct_cane;
+
+      const FLASH_TEMP_F = 212.0;
+
+      // -- Unpack mixed juice from SugarStream --------------------------------
+      const mj_lb_hr = mixed_juice_stream.flow_lb_per_hr;
+      const mj_brix_pct = mixed_juice_stream.brix;
+      const mj_purity = mixed_juice_stream.purity;
+      const mj_temp_f = mixed_juice_stream.temp_deg_F;
+      const mj_pol_pct = mj_brix_pct * mj_purity / 100;
+
+      const cane_lb_hr = cane_tpd * 2000 / 24;
+
+      // -- Fixed external inputs (lb/hr) --------------------------------------
+      const lime_lb_hr = cane_tpd * lime_lb_per_ton_cane / 24;
+      const lime_water_lb_hr = lime_lb_hr / (lime_baume / 100) - lime_lb_hr;
+      const polymer_lb_hr = cane_tpd * polymer_lb_per_ton_cane / 24;
+      const poly_water_lb_hr = polymer_lb_hr * 10 ** 6 / polymer_conc_ppm - polymer_lb_hr;
+      const wash_water_lb_hr = cane_lb_hr * filter_wash_water_pct_on_cane / 100;
+      const fc_lb_hr = cane_lb_hr * filter_cake_pct_on_cane / 100;
+      const mol_lb_hr = lime_lb_hr + lime_water_lb_hr;
+      const poly_sol_lb_hr = polymer_lb_hr + poly_water_lb_hr;
+      const fixed_lb_hr = mj_lb_hr + mol_lb_hr + poly_sol_lb_hr;
+
+      // -- MJ brix/pol (lb/hr) -------------------------------------------------
+      const mj_brix_lb_hr = mj_lb_hr * mj_brix_pct / 100;
+      const mj_pol_lb_hr = mj_lb_hr * mj_pol_pct / 100;
+      const fc_pol_lb_hr = fc_lb_hr * filter_cake_pol_pct / 100;
+
+      // -- CJ brix/pol -- external pol and brix balances ----------------------
+      const cj_pol_lb_hr = mj_pol_lb_hr - fc_pol_lb_hr;
+      const cj_brix_lb_hr = cj_pol_lb_hr * 100 / clarified_juice_purity;
+
+      // -- Filter cake brix ------------------------------------------------
+      const fc_brix_lb_hr = mj_brix_lb_hr - cj_brix_lb_hr;
+      const fc_purity = fc_pol_lb_hr / fc_brix_lb_hr * 100;
+      const fc_brix_pct = fc_brix_lb_hr / fc_lb_hr * 100;
+
+      // -- Clarifier underflow -------------------------------------------------
+      const uf_brix_pct = mj_brix_pct;
+      const uf_pol_pct = uf_brix_pct * fc_purity / 100;
+      const uf_lb_hr = clarifier_underflow_pct_cane / 100 * cane_lb_hr;
+      const uf_pol_lb_hr = uf_lb_hr * uf_pol_pct / 100;
+      const uf_brix_lb_hr = uf_lb_hr * uf_brix_pct / 100;
+
+      // -- Rotary filter -- filtrate = underflow + wash - cake -----------------
+      const filtrate_lb_hr = wash_water_lb_hr + uf_lb_hr - fc_lb_hr;
+      const filtrate_pol_lb_hr = uf_pol_lb_hr - fc_pol_lb_hr;
+      const filtrate_brix_lb_hr = uf_brix_lb_hr - fc_brix_lb_hr;
+      const filtrate_brix_pct = filtrate_brix_lb_hr / filtrate_lb_hr * 100;
+      const filtrate_pol_pct = filtrate_pol_lb_hr / filtrate_lb_hr * 100;
+      const filtrate_purity = filtrate_pol_lb_hr / filtrate_brix_lb_hr * 100;
+
+      // -- Limed juice -------------------------------------------------------
+      const lj_lb_hr = fixed_lb_hr + filtrate_lb_hr;
+      const lj_brix_lb_hr = mj_brix_lb_hr + filtrate_brix_lb_hr;
+      const lj_pol_lb_hr = mj_pol_lb_hr + filtrate_pol_lb_hr;
+      const lj_brix_pct = lj_brix_lb_hr / lj_lb_hr * 100;
+      const lj_pol_pct = lj_pol_lb_hr / lj_lb_hr * 100;
+
+      // -- Flash tank ----------------------------------------------------------
+      const flash_vapor_lb_hr = limed_juice_hot_temp_f > 212
+        ? lj_lb_hr * (limed_juice_hot_temp_f - 212) * getCp(lj_brix_pct) / 970
+        : 0;
+      const fj_lb_hr = lj_lb_hr - flash_vapor_lb_hr;
+      const fj_brix_lb_hr = lj_brix_lb_hr;
+      const fj_pol_lb_hr = lj_pol_lb_hr;
+      const fj_brix_pct = fj_brix_lb_hr / fj_lb_hr * 100;
+      const fj_pol_pct = fj_pol_lb_hr / fj_lb_hr * 100;
+
+      // -- Clarified juice -------------------------------------------------
+      const cj_lb_hr = fixed_lb_hr + wash_water_lb_hr - fc_lb_hr - flash_vapor_lb_hr;
+      const cj_pol_pct = cj_pol_lb_hr / cj_lb_hr * 100;
+      const cj_brix_pct = cj_brix_lb_hr / cj_lb_hr * 100;
+
+      // -- Scalar outputs --------------------------------------------------
+      this.flash_vapor_pct = flash_vapor_lb_hr / lj_lb_hr * 100;
+      this.filter_cake_pol_lb_per_day = fc_pol_lb_hr * 24;
+      this.filter_wash_water_lb_hr = wash_water_lb_hr;
+
+      // -- Clarified juice output stream ---------------------------------------
+      this.clarified_juice_stream = new SugarStream({
+        brix: cj_brix_pct,
+        purity: clarified_juice_purity,
+        flow_lb_per_hr: cj_lb_hr,
+        temp_deg_F: clarified_juice_temp_f,
+        pressure_psia: 14.7,
+        level_ft: 0,
+      });
+
+      // also include the Limed Juice as an output stream for use in JuiceHeating
+      this.limed_juice_cold_stream = new SugarStream({
+        brix: lj_brix_pct,
+        purity: lj_pol_lb_hr / lj_brix_lb_hr * 100,
+        flow_lb_per_hr: lj_lb_hr,
+        temp_deg_F: limed_juice_cold_temp_f,
+      });
+
+      // -- Stream table ------------------------------------------------------
+      const gpm = (lb_hr, sg) => lb_hr / (sg * 8.34 * 60);
+
+      const raw = [
+        ['Mixed Juice', 'In', mj_lb_hr, mj_brix_pct, mj_pol_pct, mj_temp_f],
+        ['Lime', 'In', lime_lb_hr, 0.0, 0.0, null],
+        ['Water for Lime', 'In', lime_water_lb_hr, 0.0, 0.0, null],
+        ['Polymer', 'In', polymer_lb_hr, 0.0, 0.0, null],
+        ['Polymer Water', 'In', poly_water_lb_hr, 0.0, 0.0, null],
+        ['Filter Wash Water', 'In', wash_water_lb_hr, 0.0, 0.0, null],
+        ['Flash Vapors', 'Out', flash_vapor_lb_hr, 0.0, 0.0, FLASH_TEMP_F],
+        ['Clarified Juice', 'Out', cj_lb_hr, cj_brix_pct, cj_pol_pct, clarified_juice_temp_f],
+        ['Filter Cake', 'Out', fc_lb_hr, fc_brix_pct, filter_cake_pol_pct, null],
+        ['Milk of Lime', 'Internal', mol_lb_hr, 0.0, 0.0, null],
+        ['Polymer Solution', 'Internal', poly_sol_lb_hr, 0.0, 0.0, null],
+        ['Limed Juice Cold', 'Internal', lj_lb_hr, lj_brix_pct, lj_pol_pct, limed_juice_cold_temp_f],
+        ['Limed Juice Hot', 'Internal', lj_lb_hr, lj_brix_pct, lj_pol_pct, limed_juice_hot_temp_f],
+        ['Flashed Juice', 'Internal', fj_lb_hr, fj_brix_pct, fj_pol_pct, FLASH_TEMP_F],
+        ['Clarifier Underflow', 'Internal', uf_lb_hr, uf_brix_pct, uf_pol_pct, null],
+        ['Filtrate', 'Internal', filtrate_lb_hr, filtrate_brix_pct, filtrate_pol_pct, null],
+      ];
+
+      this.streams = {};
+      for (const [sname, direction, lb_hr, brix, pol, temp] of raw) {
+        const purity = brix > 0 ? pol / brix * 100 : 0.0;
+        const sg = brix > 0 ? specificGravity(brix) : 1.0;
+        this.streams[sname] = {
+          direction,
+          lb_per_hr: lb_hr,
+          gpm: gpm(lb_hr, sg),
+          brix_pct: brix,
+          pol_pct: pol,
+          purity_pct: purity,
+          sg,
+          brix_lb_per_hr: lb_hr * brix / 100,
+          pol_lb_per_hr: lb_hr * pol / 100,
+          pct_on_cane: lb_hr / cane_lb_hr * 100,
+          temp_f: temp,
+        };
+      }
+    }
+
+    get balance_check() {
+      const keys = ['lb_per_hr', 'brix_lb_per_hr', 'pol_lb_per_hr'];
+      const totals = { in: {}, out: {}, difference: {} };
+      const streams = Object.values(this.streams);
+      for (const key of keys) {
+        const in_ = streams.filter((s) => s.direction === 'In').reduce((a, s) => a + s[key], 0);
+        const out_ = streams.filter((s) => s.direction === 'Out').reduce((a, s) => a + s[key], 0);
+        totals.in[key] = in_;
+        totals.out[key] = out_;
+        totals.difference[key] = in_ - out_;
+      }
+      return totals;
+    }
+
+    // Numbered stream rows in Python's `_collect_streams(clar)` diagram order
+    // (see clarification_diagram.py's TAG_ORDER).
+    _collect_streams() {
+      const TAG_ORDER = [
+        'Mixed Juice', 'Lime', 'Water for Lime', 'Polymer', 'Polymer Water',
+        'Filter Wash Water',
+        'Flash Vapors', 'Clarified Juice', 'Filter Cake',
+        'Milk of Lime', 'Polymer Solution', 'Limed Juice Cold', 'Limed Juice Hot',
+        'Flashed Juice', 'Clarifier Underflow', 'Filtrate',
+      ];
+      return TAG_ORDER.map((name, i) => {
+        const s = this.streams[name];
+        return [
+          i + 1, name, s.direction, s.lb_per_hr, s.gpm, s.brix_lb_per_hr,
+          s.pol_lb_per_hr, s.brix_pct, s.pol_pct,
+          s.brix_pct > 0 ? s.purity_pct : null,
+          s.pct_on_cane, s.temp_f,
+        ];
+      });
+    }
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = Clarification;
+  } else {
+    root.Clarification = Clarification;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// Port of Boiler.py — bagasse-fired boiler: feed water in, steam out, sized
+// against the fuel value of the bagasse it burns.
+
+(function (root) {
+  'use strict';
+
+  const SteamStream = (typeof module !== 'undefined' && module.exports) ? require('./steam_stream.js') : root.SteamStream;
+
+  class Boiler {
+    constructor({
+      bagasse,
+      efficiency = 70,
+      pressure_psig = 180,
+      deg_superheat = 0,
+      feed_water_temp = 230,
+      capacity = 0,
+      name = 'Boiler #',
+    }) {
+      this.name = name;
+      this.bagasse = bagasse;
+      this.efficiency = efficiency;
+      this.capacity = capacity;
+      this.psia = pressure_psig + 14.696;
+      this.deg_sh = deg_superheat;
+      this.feed_wat_temp = feed_water_temp;
+    }
+
+    get feed_water_stream() {
+      return new SteamStream({ T: this.feed_wat_temp, P: this.psia });
+    }
+
+    get steam_stream() {
+      const sat_steam = new SteamStream({ P: this.psia, x: 1 });
+      if (this.deg_sh > 0) {
+        const temp = sat_steam.T + this.deg_sh;
+        return new SteamStream({ P: this.psia, T: temp });
+      }
+      return sat_steam;
+    }
+
+    get btu_for_1_lb() {
+      return this.steam_stream.h - this.feed_water_stream.h;
+    }
+
+    get steam_available_per_lb_bagasse() {
+      return (this.bagasse.gcv * this.efficiency) / 100 / this.btu_for_1_lb;
+    }
+
+    get steam_availabe_lb_hr() {
+      return this.steam_available_per_lb_bagasse * this.bagasse.flowrate_lb_hr;
+    }
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = Boiler;
+  } else {
+    root.Boiler = Boiler;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// Port of Turbine.py — isentropic steam turbine with efficiency correction.
+// HP demand drives the required steam flow calculation.
+//
+// Thermodynamic process:
+//   1. Ideal:   expand isentropically (s_out = s_in) to outlet pressure -> h_out_isen
+//   2. Actual:  h_out = h_in - eta * (h_in - h_out_isen)
+//   3. Flow:    m_dot = hp_demand * 2545 BTU/HP-hr / (h_in - h_out)
+//   4. Exhaust: SteamStream(P=outlet_pressure_psia, h=h_out, flow=m_dot)
+
+(function (root) {
+  'use strict';
+
+  const IAPWS97 = (typeof module !== 'undefined' && module.exports) ? require('./iapws97.js') : root.IAPWS97;
+  const SteamStream = (typeof module !== 'undefined' && module.exports) ? require('./steam_stream.js') : root.SteamStream;
+
+  const BTU_PER_HP_HR = 2545.0;
+  const PSIA_TO_MPA = 0.00689476;
+  const KJ_KG_TO_BTU_LB = 1 / 2.326;
+  const BTU_LB_R_TO_KJ_KG_K = 4.1868;
+
+  class Turbine {
+    constructor({
+      inlet_steam,
+      outlet_pressure_psia,
+      isentropic_efficiency,
+      hp_demand,
+      name = 'Turbine',
+      desuperheating_water_temp = 212,
+    }) {
+      if (!(isentropic_efficiency > 0 && isentropic_efficiency <= 1)) {
+        throw new Error(`Isentropic efficiency must be between 0 and 1, got ${isentropic_efficiency}`);
+      }
+      this.inlet_steam = inlet_steam;
+      this.outlet_pressure_psia = outlet_pressure_psia;
+      this.isentropic_efficiency = isentropic_efficiency;
+      this.hp_demand = hp_demand;
+      this.name = name;
+      this.desuperheating_water_temp = desuperheating_water_temp;
+    }
+
+    get h_in() {
+      return this.inlet_steam.h;
+    }
+
+    get s_in() {
+      return this.inlet_steam.s;
+    }
+
+    get h_out_isentropic() {
+      const s_si = this.s_in * BTU_LB_R_TO_KJ_KG_K;
+      const P_si = this.outlet_pressure_psia * PSIA_TO_MPA;
+      const state = IAPWS97.solve({ P: P_si, s: s_si });
+      return state.h * KJ_KG_TO_BTU_LB;
+    }
+
+    get h_out_actual() {
+      return this.h_in - this.isentropic_efficiency * (this.h_in - this.h_out_isentropic);
+    }
+
+    get work_per_lb() {
+      return this.h_in - this.h_out_actual;
+    }
+
+    get steam_flow_lb_hr() {
+      return (this.hp_demand * BTU_PER_HP_HR) / this.work_per_lb;
+    }
+
+    get steam_rate() {
+      return BTU_PER_HP_HR / this.work_per_lb;
+    }
+
+    get exhaust_steam() {
+      return new SteamStream({
+        P: this.outlet_pressure_psia,
+        h: this.h_out_actual,
+        flow_lb_per_hr: this.steam_flow_lb_hr,
+      });
+    }
+
+    get exhaust_available() {
+      const exhaust = this.exhaust_steam;
+      const sat_exhaust_h = new SteamStream({ P: this.outlet_pressure_psia, x: 1 }).h;
+      if (exhaust.h === sat_exhaust_h) {
+        return exhaust.flow_lb_per_hr;
+      } else if (exhaust.h > sat_exhaust_h) {
+        const h_to_sat = exhaust.h - sat_exhaust_h;
+        const water_h = new SteamStream({ P: this.outlet_pressure_psia, T: this.desuperheating_water_temp }).h;
+        const btu_1_lb_water = sat_exhaust_h - water_h;
+        const water_lb_hr = (h_to_sat * exhaust.flow_lb_per_hr) / btu_1_lb_water;
+        return exhaust.flow_lb_per_hr + water_lb_hr;
+      } else {
+        return exhaust.flow_lb_per_hr * exhaust.x;
+      }
+    }
+
+    properties() {
+      const exhaust = this.exhaust_steam;
+      return {
+        inlet_pressure_psia: this.inlet_steam.P,
+        inlet_temp_F: this.inlet_steam.T,
+        inlet_enthalpy_btu_lb: this.h_in,
+        inlet_entropy_btu_lb_R: this.s_in,
+        outlet_pressure_psia: this.outlet_pressure_psia,
+        outlet_temp_F: exhaust.T,
+        outlet_enthalpy_btu_lb: this.h_out_actual,
+        outlet_quality: exhaust.x,
+        h_out_isentropic_btu_lb: this.h_out_isentropic,
+        isentropic_efficiency: this.isentropic_efficiency,
+        work_per_lb_btu: this.work_per_lb,
+        hp_demand: this.hp_demand,
+        steam_flow_lb_hr: this.steam_flow_lb_hr,
+        steam_rate_lb_per_hp_hr: this.steam_rate,
+        exhaust_available: this.exhaust_available,
+      };
+    }
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = Turbine;
+  } else {
+    root.Turbine = Turbine;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// Port of CogenTurbine.py — identical thermodynamics to Turbine, but sized by
+// electrical (generator) output in kW instead of mechanical shaft horsepower.
+
+(function (root) {
+  'use strict';
+
+  const Turbine = (typeof module !== 'undefined' && module.exports) ? require('./turbine.js') : root.Turbine;
+
+  const KW_PER_HP = 0.7456998715822702; // 1 mechanical HP = 0.7456998715822702 kW
+
+  class CogenTurbine extends Turbine {
+    constructor({
+      inlet_steam,
+      outlet_pressure_psia,
+      isentropic_efficiency,
+      kw_demand,
+      name = 'Cogen Turbine',
+      desuperheating_water_temp = 212,
+    }) {
+      super({
+        inlet_steam,
+        outlet_pressure_psia,
+        isentropic_efficiency,
+        hp_demand: kw_demand / KW_PER_HP,
+        name,
+        desuperheating_water_temp,
+      });
+    }
+
+    get kw_output() {
+      return this.hp_demand * KW_PER_HP;
+    }
+
+    get steam_rate_kw() {
+      return this.steam_flow_lb_hr / this.kw_output;
+    }
+
+    properties() {
+      const props = super.properties();
+      props.kw_output = this.kw_output;
+      props.steam_rate_lb_per_kw_hr = this.steam_rate_kw;
+      return props;
+    }
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = CogenTurbine;
+  } else {
+    root.CogenTurbine = CogenTurbine;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// Port of MillTurbines.py — solves a set of mill drive turbines from the
+// input lists and a fiber rate, then reports them side by side.
+
+(function (root) {
+  'use strict';
+
+  const Turbine = (typeof module !== 'undefined' && module.exports) ? require('./turbine.js') : root.Turbine;
+
+  class MillTurbines {
+    constructor({ hp_ton_fiber_hr, isentropic_efficiency, live_steam_object, exhaust_psia, tons_fiber_hr }) {
+      if (isentropic_efficiency.length !== hp_ton_fiber_hr.length) {
+        throw new Error(
+          `isentropic_efficiency has ${isentropic_efficiency.length} entries ` +
+          `but hp_ton_fiber_hr has ${hp_ton_fiber_hr.length} -- they must match`
+        );
+      }
+      this.tons_fiber_hr = tons_fiber_hr;
+
+      this.mill_turbines = {
+        hp_ton_fiber_hr,
+        isentropic_efficiency,
+        live_steam_object,
+        exhaust_psia,
+        hp_list: hp_ton_fiber_hr.map((hptf) => hptf * tons_fiber_hr),
+      };
+
+      this.turbines = this.mill_turbines.hp_list.map((hp, i) => new Turbine({
+        inlet_steam: this.mill_turbines.live_steam_object,
+        outlet_pressure_psia: this.mill_turbines.exhaust_psia,
+        isentropic_efficiency: this.mill_turbines.isentropic_efficiency[i] / 100,
+        hp_demand: hp,
+        name: `Mill ${i + 1}`,
+      }));
+    }
+
+    get total_hp() {
+      return this.turbines.reduce((s, t) => s + t.hp_demand, 0);
+    }
+
+    get total_inlet_flow_lb_hr() {
+      return this.turbines.reduce((s, t) => s + t.steam_flow_lb_hr, 0);
+    }
+
+    get total_exhaust_available_lb_hr() {
+      return this.turbines.reduce((s, t) => s + t.exhaust_available, 0);
+    }
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = MillTurbines;
+  } else {
+    root.MillTurbines = MillTurbines;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// Port of CanePrepTurbines.py — solves the cane preparation drive turbines
+// (shredders and knives) from the input lists and a fiber rate. Units with
+// 0 HP/TFH are skipped in the display (handled by the caller).
+
+(function (root) {
+  'use strict';
+
+  const Turbine = (typeof module !== 'undefined' && module.exports) ? require('./turbine.js') : root.Turbine;
+
+  const DEFAULT_NAMES = ['Shredder', 'Knife 1', 'Knife 2', 'Knife 3'];
+
+  class CanePrepTurbines {
+    constructor({ hp_ton_fiber_hr, isentropic_efficiency, live_steam_object, exhaust_psia, tons_fiber_hr, name_list = null }) {
+      if (isentropic_efficiency.length !== hp_ton_fiber_hr.length) {
+        throw new Error(
+          `isentropic_efficiency has ${isentropic_efficiency.length} entries ` +
+          `but hp_ton_fiber_hr has ${hp_ton_fiber_hr.length} -- they must match`
+        );
+      }
+      this.tons_fiber_hr = tons_fiber_hr;
+
+      const namesSrc = name_list !== null ? name_list : DEFAULT_NAMES;
+      const names = hp_ton_fiber_hr.map((_, i) => (i < namesSrc.length ? namesSrc[i] : `Unit ${i + 1}`));
+
+      this.cane_prep_turbines = {
+        hp_ton_fiber_hr,
+        isentropic_efficiency,
+        live_steam_object,
+        exhaust_psia,
+        name_list: names,
+        hp_list: hp_ton_fiber_hr.map((hptf) => hptf * tons_fiber_hr),
+      };
+
+      this.turbines = this.cane_prep_turbines.hp_list.map((hp, i) => new Turbine({
+        inlet_steam: this.cane_prep_turbines.live_steam_object,
+        outlet_pressure_psia: this.cane_prep_turbines.exhaust_psia,
+        isentropic_efficiency: this.cane_prep_turbines.isentropic_efficiency[i] / 100,
+        hp_demand: hp,
+        name: this.cane_prep_turbines.name_list[i],
+      }));
+    }
+
+    get total_hp() {
+      return this.turbines.reduce((s, t) => s + t.hp_demand, 0);
+    }
+
+    get total_inlet_flow_lb_hr() {
+      return this.turbines.reduce((s, t) => s + t.steam_flow_lb_hr, 0);
+    }
+
+    get total_exhaust_available_lb_hr() {
+      return this.turbines.reduce((s, t) => s + t.exhaust_available, 0);
+    }
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = CanePrepTurbines;
+  } else {
+    root.CanePrepTurbines = CanePrepTurbines;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// Port of AuxillaryTurbines.py — solves the auxillary drive turbines
+// (ID fans, pumps, etc.) from the input lists. Units with 0 HP are skipped
+// in the display (handled by the caller).
+
+(function (root) {
+  'use strict';
+
+  const Turbine = (typeof module !== 'undefined' && module.exports) ? require('./turbine.js') : root.Turbine;
+
+  class AuxillaryTurbines {
+    constructor({ group_name, name_list, hp_list, isentropic_efficiency, live_steam_object, exhaust_psia }) {
+      if (name_list.length !== hp_list.length) {
+        throw new Error(
+          `name_list has ${name_list.length} entries but hp_list has ${hp_list.length} -- they must match`
+        );
+      }
+      if (isentropic_efficiency.length !== hp_list.length) {
+        throw new Error(
+          `isentropic_efficiency has ${isentropic_efficiency.length} entries ` +
+          `but hp_list has ${hp_list.length} -- they must match`
+        );
+      }
+
+      this.group_name = group_name;
+
+      this.auxillary_turbines = {
+        name_list,
+        isentropic_efficiency,
+        live_steam_object,
+        exhaust_psia,
+        hp_list,
+      };
+
+      this.turbines = hp_list.map((hp, i) => new Turbine({
+        inlet_steam: this.auxillary_turbines.live_steam_object,
+        outlet_pressure_psia: this.auxillary_turbines.exhaust_psia,
+        isentropic_efficiency: this.auxillary_turbines.isentropic_efficiency[i] / 100,
+        hp_demand: hp,
+        name: this.auxillary_turbines.name_list[i],
+      }));
+    }
+
+    get total_hp() {
+      return this.turbines.reduce((s, t) => s + t.hp_demand, 0);
+    }
+
+    get total_inlet_flow_lb_hr() {
+      return this.turbines.reduce((s, t) => s + t.steam_flow_lb_hr, 0);
+    }
+
+    get total_exhaust_available_lb_hr() {
+      return this.turbines.reduce((s, t) => s + t.exhaust_available, 0);
+    }
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = AuxillaryTurbines;
+  } else {
+    root.AuxillaryTurbines = AuxillaryTurbines;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// Port of Deaerator.py — deaerator energy and mass balance. Incoming cold
+// water is heated to saturation at deaerator pressure by condensing live
+// steam; vent loss is applied to the steam requirement.
+
+(function (root) {
+  'use strict';
+
+  const SteamStream = (typeof module !== 'undefined' && module.exports) ? require('./steam_stream.js') : root.SteamStream;
+
+  class Deaerator {
+    constructor({ deaerator_psig = 10, water_in_deg_F = 200, water_in_lb_hr = 100, vent_pct = 1.0 } = {}) {
+      this.psia = deaerator_psig + 14.696;
+      this.water_in_deg_F = water_in_deg_F;
+      this.water_in_lb_hr = water_in_lb_hr;
+      this.vent_pct = vent_pct;
+    }
+
+    get _steam_state() {
+      return new SteamStream({ x: 1, P: this.psia });
+    }
+
+    get _water_out_state() {
+      return new SteamStream({ x: 0, P: this.psia });
+    }
+
+    get _water_in_state() {
+      return new SteamStream({ x: 0, T: this.water_in_deg_F });
+    }
+
+    get steam_flow_lb_hr() {
+      const Q_sens = this.water_in_lb_hr * (this._water_out_state.h - this._water_in_state.h);
+      const steam_net = Q_sens / this._steam_state.h_fg;
+      return steam_net / (1 - this.vent_pct / 100);
+    }
+
+    get vent_flow_lb_hr() {
+      return (this.steam_flow_lb_hr * this.vent_pct) / 100;
+    }
+
+    get water_out_flow_lb_hr() {
+      return this.water_in_lb_hr + this.steam_flow_lb_hr - this.vent_flow_lb_hr;
+    }
+
+    get steam_in() {
+      const s = new SteamStream({ x: 1, P: this.psia });
+      s.flow_lb_per_hr = this.steam_flow_lb_hr;
+      return s;
+    }
+
+    get water_in() {
+      const s = new SteamStream({ x: 0, T: this.water_in_deg_F });
+      s.flow_lb_per_hr = this.water_in_lb_hr;
+      return s;
+    }
+
+    get water_out() {
+      const s = new SteamStream({ x: 0, P: this.psia });
+      s.flow_lb_per_hr = this.water_out_flow_lb_hr;
+      return s;
+    }
+
+    get vent() {
+      const s = new SteamStream({ x: 1, P: 14.696 });
+      s.flow_lb_per_hr = this.vent_flow_lb_hr;
+      return s;
+    }
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = Deaerator;
+  } else {
+    root.Deaerator = Deaerator;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// Port of condensate_utils.py — shared post-flash condensate helper.
+// Condensate hotter than atmospheric partially flashes to vapor when let
+// down to atmospheric pressure for return to the boiler feed system; this
+// returns the liquid fraction that survives. Used by JuiceHeatingStation
+// (and, later, EvaporatorSet / Pan Floor) to total "clean" (exhaust) vs
+// "dirty" (V1-V4) condensate return.
+
+(function (root) {
+  'use strict';
+
+  const FLASH_TEMP_F = 212.0;
+  const H_FG_FLASH_BTU_LB = 970.0;
+
+  function flash_condensate(flow_lb_per_hr, sat_temp_deg_F,
+                             flash_temp_F = FLASH_TEMP_F,
+                             h_fg_flash_btu_lb = H_FG_FLASH_BTU_LB) {
+    if (sat_temp_deg_F <= flash_temp_F) return flow_lb_per_hr;
+    const flash = flow_lb_per_hr * (sat_temp_deg_F - flash_temp_F) / h_fg_flash_btu_lb;
+    return flow_lb_per_hr - flash;
+  }
+
+  const condensate_utils = { flash_condensate, FLASH_TEMP_F, H_FG_FLASH_BTU_LB };
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = condensate_utils;
+  } else {
+    root.condensate_utils = condensate_utils;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// Port of JuiceHeater.py's JuiceHeaterShellTube — a shell & tube juice
+// heater. Display/PFD/Excel export methods are not ported (offline HTML
+// app has its own UI for that); the calculation properties mirror the
+// Python class name-for-name.
+
+(function (root) {
+  'use strict';
+
+  const SugarStream = (typeof module !== 'undefined' && module.exports) ? require('./sugar_stream.js') : root.SugarStream;
+
+  class JuiceHeaterShellTube {
+    constructor({
+      cold_stream,
+      hot_stream,
+      name = 'Heater',
+      juice_out_temp_degF = 220,
+      U_btu_per_ft2_degF = 220,
+      installed_area_ft2 = 22000,
+      steam_type = 0, // 0 = Exh, 1 = V1, 2 = V2, 3 = V3, 4 = V4
+    } = {}) {
+      this.name = name;
+      this.U = U_btu_per_ft2_degF;
+      this.cold_stream = cold_stream;
+      this.hot_stream = hot_stream;
+      this.juice_out_temp_degF = juice_out_temp_degF;
+      this.installed_area_ft2 = installed_area_ft2;
+      this.steam_type = steam_type;
+
+      this.juice_out = new SugarStream({
+        brix: this.cold_stream.brix,
+        purity: this.cold_stream.purity,
+        flow_lb_per_hr: this.cold_stream.flow_lb_per_hr,
+        temp_deg_F: this.juice_out_temp_degF,
+        pressure_psia: this.cold_stream.pressure_psia,
+        level_ft: this.cold_stream.level_ft,
+      });
+
+      // Stamp the required steam flow onto the supply stream so downstream
+      // code can read hot_stream.flow_lb_per_hr directly. NOTE: if one
+      // SteamStream object is shared by several heaters, the last heater
+      // constructed wins -- give each heater its own SteamStream.
+      this.hot_stream.flow_lb_per_hr = this.steam_required_lb_per_hr;
+    }
+
+    get cold_delta_T() {
+      return this.juice_out_temp_degF - this.cold_stream.temp_deg_F;
+    }
+
+    get Q_btu_per_hr() {
+      return this.cold_stream.flow_lb_per_hr * this.cold_stream.cp_btu_per_lb_deg_F * this.cold_delta_T;
+    }
+
+    get LMTD_degF() {
+      const delta_T1 = this.hot_stream.T - this.cold_stream.temp_deg_F;
+      const delta_T2 = this.hot_stream.T - this.juice_out_temp_degF;
+      if (delta_T1 === delta_T2) return delta_T1;
+      return (delta_T1 - delta_T2) / Math.log(delta_T1 / delta_T2);
+    }
+
+    get required_area_ft2() {
+      return this.Q_btu_per_hr / (this.U * this.LMTD_degF);
+    }
+
+    get steam_required_lb_per_hr() {
+      return this.Q_btu_per_hr / this.hot_stream.h_fg;
+    }
+
+    get is_steam_hot_enough() {
+      if (this.hot_stream.T <= this.juice_out_temp_degF) {
+        return `NO! Steam temp (${this.hot_stream.T.toFixed(2)} °F) <= juice out temperature (${this.juice_out_temp_degF} °F).`;
+      }
+      return 'YES';
+    }
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = JuiceHeaterShellTube;
+  } else {
+    root.JuiceHeaterShellTube = JuiceHeaterShellTube;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// Port of JuiceHeatingStation.py — arranges JuiceHeaterShellTube units in
+// SERIES or PARALLEL and solves the train. The heat transfer math itself
+// lives in JuiceHeaterShellTube (juice_heater.js); this class only wires
+// the cold streams together (chained outlet->inlet for series, flow split
+// for parallel), then reports totals. Display/PFD/Excel export methods are
+// not ported (offline HTML app has its own UI for that).
+
+(function (root) {
+  'use strict';
+
+  const SugarStream = (typeof module !== 'undefined' && module.exports) ? require('./sugar_stream.js') : root.SugarStream;
+  const SteamStream = (typeof module !== 'undefined' && module.exports) ? require('./steam_stream.js') : root.SteamStream;
+  const JuiceHeaterShellTube = (typeof module !== 'undefined' && module.exports) ? require('./juice_heater.js') : root.JuiceHeaterShellTube;
+  const condensate_utils = (typeof module !== 'undefined' && module.exports) ? require('./condensate_utils.js') : root.condensate_utils;
+
+  class JuiceHeatingStation {
+    constructor({
+      cold_stream,
+      heaters,
+      mode = 'series',
+      split_pcts = null,
+      name = 'Juice Heating Station',
+    } = {}) {
+      mode = mode.toLowerCase();
+      if (mode !== 'series' && mode !== 'parallel') {
+        throw new Error(`mode must be 'series' or 'parallel', got '${mode}'`);
+      }
+      this.name = name;
+      this.mode = mode;
+      this.cold_stream = cold_stream;
+      this._heater_cfgs = heaters;
+
+      if (mode === 'parallel') {
+        const n = heaters.length;
+        this.split_pcts = split_pcts !== null ? split_pcts : Array(n).fill(100.0 / n);
+        if (this.split_pcts.length !== n) {
+          throw new Error('split_pcts must have one entry per heater');
+        }
+        const total = this.split_pcts.reduce((a, b) => a + b, 0);
+        if (Math.abs(total - 100.0) > 0.01) {
+          throw new Error(`split_pcts must sum to 100, got ${total}`);
+        }
+      } else {
+        this.split_pcts = null;
+      }
+
+      this._solve();
+    }
+
+    // Fresh SteamStream at the same conditions, so each solved heater
+    // stamps its steam requirement onto its OWN stream (JuiceHeater sets
+    // hot_stream.flow_lb_per_hr at construction).
+    static _copy_steam(s) {
+      if (s.x !== null && s.x !== undefined && s.x >= 0 && s.x <= 1) {
+        return new SteamStream({ P: s.P, x: s.x });
+      }
+      return new SteamStream({ P: s.P, T: s.T });
+    }
+
+    // Fresh SteamStream at a new pressure, keeping the same quality (if
+    // saturated) or temperature (if superheated) as the original.
+    static _repressure_steam(old, P) {
+      if (old.x !== null && old.x !== undefined && old.x >= 0 && old.x <= 1) {
+        return new SteamStream({ P, x: old.x });
+      }
+      return new SteamStream({ P, T: old.T });
+    }
+
+    // Update the steam pressure for every heater on a given steam_type
+    // (0=Exhaust, 1=V1, 2=V2, 3=V3, 4=V4) and resolve the station.
+    set_steam_pressure(steam_type, P) {
+      let matched = false;
+      this._heater_cfgs.forEach((cfg) => {
+        if (cfg.steam_type === steam_type) {
+          cfg.hot_stream = JuiceHeatingStation._repressure_steam(cfg.hot_stream, P);
+          matched = true;
+        }
+      });
+      if (!matched) throw new Error(`no heaters found with steam_type=${steam_type}`);
+      this._solve();
+    }
+
+    _rebuild(cfg, cold) {
+      return new JuiceHeaterShellTube({
+        cold_stream: cold,
+        hot_stream: JuiceHeatingStation._copy_steam(cfg.hot_stream),
+        name: cfg.name,
+        juice_out_temp_degF: cfg.juice_out_temp_degF,
+        U_btu_per_ft2_degF: cfg.U,
+        installed_area_ft2: cfg.installed_area_ft2,
+        steam_type: cfg.steam_type,
+      });
+    }
+
+    _solve() {
+      this.heaters = [];
+      if (this.mode === 'series') {
+        let cold = this.cold_stream;
+        this._heater_cfgs.forEach((cfg) => {
+          const heater = this._rebuild(cfg, cold);
+          this.heaters.push(heater);
+          cold = heater.juice_out;
+        });
+        this.juice_out = this.heaters[this.heaters.length - 1].juice_out;
+      } else {
+        this._heater_cfgs.forEach((cfg, i) => {
+          const pct = this.split_pcts[i];
+          const split = SugarStream.copy(this.cold_stream);
+          split.flow_lb_per_hr = (pct / 100) * this.cold_stream.flow_lb_per_hr;
+          this.heaters.push(this._rebuild(cfg, split));
+        });
+        // combined hot juice: total flow at the mass-weighted blend temp
+        const total = this.heaters.reduce((sum, h) => sum + h.juice_out.flow_lb_per_hr, 0);
+        const blend = this.heaters.reduce((sum, h) => sum + h.juice_out.flow_lb_per_hr * h.juice_out.temp_deg_F, 0) / total;
+        const out = SugarStream.copy(this.cold_stream);
+        out.flow_lb_per_hr = total;
+        out.temp_deg_F = blend;
+        this.juice_out = out;
+      }
+    }
+
+    get total_steam_lb_hr() {
+      return this.heaters.reduce((sum, h) => sum + h.steam_required_lb_per_hr, 0);
+    }
+
+    _steam_demand_lb_hr(steam_type) {
+      return this.heaters
+        .filter((h) => h.steam_type === steam_type)
+        .reduce((sum, h) => sum + h.steam_required_lb_per_hr, 0);
+    }
+
+    get total_exhaust_steam_lb_hr() {
+      return this._steam_demand_lb_hr(0);
+    }
+
+    get total_V1_steam_lb_hr() {
+      return this._steam_demand_lb_hr(1);
+    }
+
+    get total_V2_steam_lb_hr() {
+      return this._steam_demand_lb_hr(2);
+    }
+
+    get total_V3_steam_lb_hr() {
+      return this._steam_demand_lb_hr(3);
+    }
+
+    get total_V4_steam_lb_hr() {
+      return this._steam_demand_lb_hr(4);
+    }
+
+    get clean_condensate() {
+      return this.heaters
+        .filter((h) => h.steam_type === 0)
+        .reduce((sum, h) => sum + condensate_utils.flash_condensate(h.steam_required_lb_per_hr, h.hot_stream.T), 0);
+    }
+
+    get dirty_condensate() {
+      return this.heaters
+        .filter((h) => h.steam_type !== 0)
+        .reduce((sum, h) => sum + condensate_utils.flash_condensate(h.steam_required_lb_per_hr, h.hot_stream.T), 0);
+    }
+
+    get total_duty_btu_hr() {
+      return this.heaters.reduce((sum, h) => sum + h.Q_btu_per_hr, 0);
+    }
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = JuiceHeatingStation;
+  } else {
+    root.JuiceHeatingStation = JuiceHeatingStation;
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+(function () {
+  'use strict';
+
+  const TABS = [
+    { id: 'steam', label: 'Steam Tables', enabled: true },
+    { id: 'mill', label: 'Mill Floor', enabled: true },
+    { id: 'clar', label: 'Clarification', enabled: true },
+    { id: 'heat', label: 'Juice Heating', enabled: true },
+    { id: 'pan', label: 'Pan Floor', enabled: false },
+    { id: 'evap', label: 'Evaporation', enabled: false },
+    { id: 'exhaust', label: 'Exhaust Summary', enabled: false },
+    { id: 'turb', label: 'Turbines & Boiler', enabled: true },
+    { id: 'cool', label: 'Cooling Tower', enabled: false },
+    { id: 'cond', label: 'Condensate Balance', enabled: false },
+    { id: 'export', label: 'Download', enabled: false },
+  ];
+
+  function buildTabs() {
+    const nav = document.getElementById('tabs');
+    const main = document.getElementById('main');
+    TABS.forEach((tab, i) => {
+      const btn = document.createElement('button');
+      btn.textContent = tab.label;
+      btn.disabled = !tab.enabled;
+      btn.dataset.tab = tab.id;
+      if (i === 0) btn.classList.add('active');
+      btn.addEventListener('click', () => showTab(tab.id));
+      nav.appendChild(btn);
+
+      const section = document.createElement('section');
+      section.id = 'tab-' + tab.id;
+      section.hidden = i !== 0;
+      if (!tab.enabled) {
+        section.innerHTML = `<div class="panel"><p class="placeholder">${tab.label} is not built yet. See web/PROGRESS.md for the port roadmap.</p></div>`;
+      }
+      main.appendChild(section);
+    });
+  }
+
+  function showTab(id) {
+    document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
+    document.querySelectorAll('main section').forEach(s => s.hidden = s.id !== 'tab-' + id);
+  }
+
+  // ---------------------------------------------------------------------
+  // Steam Tables utility tab -- a live sanity check of the IAPWS97 port,
+  // and a standalone steam-property lookup tool in its own right.
+  // ---------------------------------------------------------------------
+
+  const MODES = {
+    TP: { a: { key: 'T', label: 'Temperature (F)' }, b: { key: 'P', label: 'Pressure (psia)' } },
+    Px: { a: { key: 'P', label: 'Pressure (psia)' }, b: { key: 'x', label: 'Quality (0-1)' } },
+    Tx: { a: { key: 'T', label: 'Temperature (F)' }, b: { key: 'x', label: 'Quality (0-1)' } },
+    Ph: { a: { key: 'P', label: 'Pressure (psia)' }, b: { key: 'h', label: 'Enthalpy (BTU/lb)' } },
+    Ps: { a: { key: 'P', label: 'Pressure (psia)' }, b: { key: 's', label: 'Entropy (BTU/lb-R)' } },
+  };
+
+  function buildSteamTab() {
+    const section = document.getElementById('tab-steam');
+    section.innerHTML = `
+      <div class="panel">
+        <h2>Steam Property Lookup (IAPWS-97)</h2>
+        <div class="grid">
+          <div>
+            <label>Input pair</label>
+            <select id="ss-mode">
+              <option value="TP">Temperature &amp; Pressure</option>
+              <option value="Px">Pressure &amp; Quality</option>
+              <option value="Tx">Temperature &amp; Quality</option>
+              <option value="Ph">Pressure &amp; Enthalpy</option>
+              <option value="Ps">Pressure &amp; Entropy</option>
+            </select>
+          </div>
+          <div><label id="ss-label-a"></label><input id="ss-a" type="number" step="any"></div>
+          <div><label id="ss-label-b"></label><input id="ss-b" type="number" step="any"></div>
+          <div><label>Flow (lb/hr, optional)</label><input id="ss-flow" type="number" step="any" value="0"></div>
+        </div>
+        <p><button class="primary" id="ss-calc">Calculate</button></p>
+        <div id="ss-result"></div>
+      </div>`;
+
+    const modeSel = section.querySelector('#ss-mode');
+    const labelA = section.querySelector('#ss-label-a');
+    const labelB = section.querySelector('#ss-label-b');
+    const inputA = section.querySelector('#ss-a');
+    const inputB = section.querySelector('#ss-b');
+    const resultDiv = section.querySelector('#ss-result');
+
+    function applyMode() {
+      const m = MODES[modeSel.value];
+      labelA.textContent = m.a.label;
+      labelB.textContent = m.b.label;
+    }
+    modeSel.addEventListener('change', applyMode);
+    applyMode();
+
+    // sensible defaults: 180 psig saturated steam
+    modeSel.value = 'Px';
+    applyMode();
+    inputA.value = 194.7;
+    inputB.value = 1;
+
+    section.querySelector('#ss-calc').addEventListener('click', () => {
+      const m = MODES[modeSel.value];
+      const kwargs = {};
+      kwargs[m.a.key] = parseFloat(inputA.value);
+      kwargs[m.b.key] = parseFloat(inputB.value);
+      kwargs.flow_lb_per_hr = parseFloat(section.querySelector('#ss-flow').value) || 0;
+
+      try {
+        const s = new SteamStream(kwargs);
+        const p = s.properties();
+        const rows = [
+          ['Temperature', p.T.toFixed(2), 'F'],
+          ['Pressure', p.P.toFixed(3), 'psia'],
+          ['Enthalpy', p.h.toFixed(2), 'BTU/lb'],
+          ['Entropy', p.s.toFixed(4), 'BTU/lb-R'],
+          ['Quality', p.x === null || p.x === undefined ? '-' : p.x.toFixed(4), ''],
+          ['Specific volume', p.v.toFixed(4), 'ft3/lb'],
+          ['Density', p.rho.toFixed(4), 'lb/ft3'],
+          ['Latent heat (h_fg at P)', p.h_fg.toFixed(2), 'BTU/lb'],
+          ['Superheated?', p.is_superheated ? 'Yes' : 'No', ''],
+          ['Flow', p.flow_lb_per_hr.toLocaleString(), 'lb/hr'],
+        ];
+        resultDiv.innerHTML = '<table><tbody>' +
+          rows.map(([k, v, u]) => `<tr><td>${k}</td><td>${v}</td><td>${u}</td></tr>`).join('') +
+          '</tbody></table>';
+      } catch (e) {
+        resultDiv.innerHTML = `<p class="error">${e.message}</p>`;
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Shared plant state -- lets later tabs (Clarification, ...) chain off
+  // the mill floor's mixed juice / bagasse streams once it has been solved.
+  // ---------------------------------------------------------------------
+  const PlantState = { mill: null, clar: null, heat: null };
+
+  function inputField(id, label, value, step) {
+    return `<div><label for="${id}">${label}</label><input id="${id}" type="number" step="${step || 'any'}" value="${value}"></div>`;
+  }
+
+  function readFields(section, ids) {
+    const out = {};
+    ids.forEach((id) => { out[id] = parseFloat(section.querySelector('#' + id).value); });
+    return out;
+  }
+
+  function fmt(v, digits) {
+    if (v === null || v === undefined || Number.isNaN(v)) return '-';
+    return v.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  }
+
+  function renderTable(headers, rows) {
+    const thead = '<thead><tr>' + headers.map((h) => `<th>${h}</th>`).join('') + '</tr></thead>';
+    const tbody = '<tbody>' + rows.map((r) => '<tr>' + r.map((c) => `<td>${c}</td>`).join('') + '</tr>').join('') + '</tbody>';
+    return `<div class="table-wrap"><table>${thead}${tbody}</table></div>`;
+  }
+
+  function checkboxField(id, label, checked) {
+    return `<div class="checkbox-field"><input id="${id}" type="checkbox" ${checked ? 'checked' : ''}><label for="${id}" style="margin:0;">${label}</label></div>`;
+  }
+
+  // Editable row tables (name/HP/efficiency lists etc.) -- a plain grid of
+  // <input> cells, since this app has no spreadsheet-style data editor.
+  // A column with type: 'select' renders a <select> of c.options instead.
+  function editableRowsTable(id, columns, rows) {
+    const header = '<tr>' + columns.map((c) => `<th>${c.label}</th>`).join('') + '</tr>';
+    const body = rows.map((row, i) => '<tr>' + columns.map((c) => {
+      const inputId = `${id}-${i}-${c.key}`;
+      if (c.type === 'select') {
+        const opts = c.options.map((o) => `<option value="${o}"${o === row[c.key] ? ' selected' : ''}>${o}</option>`).join('');
+        return `<td><select id="${inputId}">${opts}</select></td>`;
+      }
+      const type = c.type === 'text' ? 'text' : 'number';
+      const step = c.type === 'text' ? '' : ` step="${c.step || 'any'}"`;
+      return `<td><input id="${inputId}" type="${type}"${step} value="${row[c.key]}"></td>`;
+    }).join('') + '</tr>').join('');
+    return `<div class="table-wrap"><table class="editable"><thead>${header}</thead><tbody>${body}</tbody></table></div>`;
+  }
+
+  function readEditableRows(section, id, columns, count) {
+    const rows = [];
+    for (let i = 0; i < count; i++) {
+      const row = {};
+      columns.forEach((c) => {
+        const el = section.querySelector(`#${id}-${i}-${c.key}`);
+        row[c.key] = (c.type === 'text' || c.type === 'select') ? el.value : parseFloat(el.value);
+      });
+      rows.push(row);
+    }
+    return rows;
+  }
+
+  function fmtQuality(x) {
+    return (x === null || x === undefined || x >= 1.0) ? 'Superheat' : x.toFixed(4);
+  }
+
+  // One row per turbine unit + a TOTAL row, mirroring turbine_diagram.py's
+  // _group_info() (used by the Python app for its PFD table / Excel export).
+  function turbineGroupTable(group, { tfhList = null, skip = null } = {}) {
+    const headers = ['Unit', 'Inlet Flow (lb/hr)', 'Exhaust Avail (lb/hr)', 'HP'];
+    if (tfhList) headers.push('HP/TFH');
+    headers.push('Steam Rate (lb/HP-hr)', 'Inlet psia', 'Inlet °F', 'Outlet psia', 'Outlet °F', 'Outlet Quality');
+
+    const rows = [];
+    group.turbines.forEach((trb, i) => {
+      if (skip && skip[i]) return;
+      const ex = trb.exhaust_steam;
+      const row = [trb.name, fmt(trb.steam_flow_lb_hr, 0), fmt(trb.exhaust_available, 0), fmt(trb.hp_demand, 0)];
+      if (tfhList) row.push(fmt(tfhList[i], 1));
+      row.push(fmt(trb.steam_rate, 2), fmt(trb.inlet_steam.P, 1), fmt(trb.inlet_steam.T, 1), fmt(ex.P, 1), fmt(ex.T, 1), fmtQuality(ex.x));
+      rows.push(row);
+    });
+
+    const totalRow = ['TOTAL', fmt(group.total_inlet_flow_lb_hr, 0), fmt(group.total_exhaust_available_lb_hr, 0), fmt(group.total_hp, 0)];
+    if (tfhList) totalRow.push(fmt(tfhList.reduce((a, b) => a + b, 0), 1));
+    totalRow.push(fmt(group.total_inlet_flow_lb_hr / group.total_hp, 2), '', '', '', '', '');
+    rows.push(totalRow);
+
+    return renderTable(headers, rows);
+  }
+
+  // ---------------------------------------------------------------------
+  // Mill Floor tab
+  // ---------------------------------------------------------------------
+  function buildMillTab() {
+    const section = document.getElementById('tab-mill');
+    section.innerHTML = `
+      <div class="panel">
+        <h2>Mill Floor Inputs</h2>
+        <div class="grid">
+          ${inputField('mf-cane_tpd', 'Cane throughput (TPD)', 19000, 100)}
+          ${inputField('mf-cane_pol_pct', 'Cane pol (%)', 13.5, 0.1)}
+          ${inputField('mf-cane_fiber_pct', 'Cane fiber (%)', 14.0, 0.1)}
+          ${inputField('mf-number_of_mills', 'Number of mills', 6, 1)}
+          ${inputField('mf-mill_1_fiber_rise_load_fraction', 'Mill 1 fiber rise load fraction', 0.35, 0.01)}
+          ${inputField('mf-imbibition_pct_on_cane', 'Imbibition (% on cane)', 30.0, 0.5)}
+          ${inputField('mf-juice_temp_F', 'Juice temperature (F)', 90.0, 1)}
+          ${inputField('mf-mix_juice_purity', 'Mixed juice purity (%)', 88.0, 0.1)}
+          ${inputField('mf-bagasse_pol_pct', 'Bagasse pol (%)', 2.1, 0.1)}
+          ${inputField('mf-last_roll_purity', 'Last roll juice purity (%)', 72.0, 0.5)}
+          ${inputField('mf-bagasse_moisture_pct', 'Bagasse moisture (%)', 49.5, 0.5)}
+          ${inputField('mf-bagasse_ash_pct', 'Bagasse ash (%)', 5.0, 0.5)}
+        </div>
+        <p><button class="primary" id="mf-calc">Calculate</button></p>
+        <div id="mf-result"></div>
+      </div>`;
+
+    const resultDiv = section.querySelector('#mf-result');
+
+    section.querySelector('#mf-calc').addEventListener('click', () => {
+      try {
+        const v = readFields(section, [
+          'mf-cane_tpd', 'mf-cane_pol_pct', 'mf-cane_fiber_pct', 'mf-number_of_mills',
+          'mf-mill_1_fiber_rise_load_fraction', 'mf-imbibition_pct_on_cane', 'mf-juice_temp_F',
+          'mf-mix_juice_purity', 'mf-bagasse_pol_pct', 'mf-last_roll_purity',
+          'mf-bagasse_moisture_pct', 'mf-bagasse_ash_pct',
+        ]);
+
+        const mill = new MillFloor({
+          cane_tpd: v['mf-cane_tpd'],
+          cane_pol_pct: v['mf-cane_pol_pct'],
+          cane_fiber_pct: v['mf-cane_fiber_pct'],
+          imbibition_pct_on_cane: v['mf-imbibition_pct_on_cane'],
+          bagasse_pol_pct: v['mf-bagasse_pol_pct'],
+          last_roll_purity: v['mf-last_roll_purity'],
+          bagasse_moisture_pct: v['mf-bagasse_moisture_pct'],
+          bagasse_ash_pct: v['mf-bagasse_ash_pct'],
+          mix_juice_purity: v['mf-mix_juice_purity'],
+          number_of_mills: Math.round(v['mf-number_of_mills']),
+          juice_temp_F: v['mf-juice_temp_F'],
+          mill_1_fiber_rise_load_fraction: v['mf-mill_1_fiber_rise_load_fraction'],
+          name: 'Mill Floor',
+        });
+
+        PlantState.mill = mill;
+
+        const mj = mill.mixed_juice_stream;
+        const bag = mill.bagasse_stream;
+
+        const metrics = `
+          <div class="metrics">
+            <div class="metric"><div class="metric-label">Mill extraction</div><div class="metric-value">${fmt(mill.mill_extraction_pct, 2)}%</div></div>
+            <div class="metric"><div class="metric-label">Mixed juice flow</div><div class="metric-value">${fmt(mj.flow_lb_per_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">Mixed juice brix / purity</div><div class="metric-value">${fmt(mj.brix, 2)}% / ${fmt(mj.purity, 1)}%</div></div>
+            <div class="metric"><div class="metric-label">Bagasse flow</div><div class="metric-value">${fmt(bag.flowrate_lb_hr / 2000 * 24, 0)} TPD</div></div>
+          </div>`;
+
+        const { rows, in_tot, out_tot } = mill._stream_table_rows();
+        const diff = in_tot.map((x, i) => x - out_tot[i]);
+        const streamRows = rows.map(([name, dir, ...vals]) => [name, dir, ...vals.map((x) => fmt(x, 2))]);
+        streamRows.push(['Total In', '', ...in_tot.map((x) => fmt(x, 2))]);
+        streamRows.push(['Total Out', '', ...out_tot.map((x) => fmt(x, 2))]);
+        streamRows.push(['Difference', '', ...diff.map((x) => fmt(x, 4))]);
+        const streamTable = renderTable(
+          ['Stream', 'Dir', 'Flow (TPH)', 'Pol (TPH)', 'Brix (TPH)', 'Fiber (TPH)', 'Water (TPH)'],
+          streamRows,
+        );
+
+        const mbRows = mill.mill_balances.map((m) => [
+          m.mill, fmt(m.bagasse_in_tpd, 1), fmt(m.mac_in_tpd, 1), m.mac_in_source,
+          fmt(m.bagasse_out_tpd, 1), fmt(m.juice_out_tpd, 1), m.juice_out_dest,
+        ]);
+        const mbTable = renderTable(
+          ['Mill', 'Bagasse In', 'Liquid In', 'Liquid In Source', 'Bagasse Out', 'Juice Out', 'Juice Out Dest'],
+          mbRows,
+        );
+
+        const bal = mill.balance_check;
+        const balRows = Object.entries(bal).map(([k, v]) => [k, fmt(v.in_tph, 4), fmt(v.out_tph, 4), fmt(v.diff_tph, 6)]);
+        const balTable = renderTable(['Quantity', 'In (TPH)', 'Out (TPH)', 'Diff (TPH)'], balRows);
+
+        resultDiv.innerHTML = metrics +
+          '<h3 class="section-title">Stream Table (TPH)</h3>' + streamTable +
+          '<h3 class="section-title">Per-Mill Maceration Balance (TPD)</h3>' + mbTable +
+          '<h3 class="section-title">Balance Check</h3>' + balTable;
+      } catch (e) {
+        resultDiv.innerHTML = `<p class="error">${e.message}</p>`;
+      }
+    });
+
+    section.querySelector('#mf-calc').click();
+  }
+
+  // ---------------------------------------------------------------------
+  // Clarification tab
+  // ---------------------------------------------------------------------
+  function buildClarTab() {
+    const section = document.getElementById('tab-clar');
+    section.innerHTML = `
+      <div class="panel">
+        <h2>Clarification Inputs</h2>
+        <div class="grid">
+          ${inputField('cl-filter_wash_water_pct_on_cane', 'Filter wash water (% on cane)', 5.0, 0.5)}
+          ${inputField('cl-filter_cake_pct_on_cane', 'Filter cake (% on cane)', 5.0, 0.5)}
+          ${inputField('cl-filter_cake_pol_pct', 'Filter cake pol (%)', 2.4, 0.1)}
+          ${inputField('cl-clarified_juice_purity', 'Clarified juice purity (%)', 88.5, 0.1)}
+          ${inputField('cl-limed_juice_cold_temp_f', 'Limed juice cold temp (F)', 95.0, 1)}
+          ${inputField('cl-limed_juice_hot_temp_f', 'Limed juice hot temp (F)', 220.0, 1)}
+          ${inputField('cl-clarified_juice_temp_f', 'Clarified juice temp (F)', 205.0, 1)}
+          ${inputField('cl-lime_lb_per_ton_cane', 'Lime dose (lb/ton cane)', 1.3, 0.1)}
+          ${inputField('cl-lime_baume', 'Milk of lime (Baume)', 10.0, 0.5)}
+          ${inputField('cl-polymer_conc_ppm', 'Polymer concentration (ppm)', 5000.0, 100)}
+          ${inputField('cl-polymer_lb_per_ton_cane', 'Polymer dose (lb/ton cane)', 0.045, 0.005)}
+          ${inputField('cl-clarifier_underflow_pct_cane', 'Clarifier underflow (% on cane)', 20.0, 0.5)}
+        </div>
+        <p><button class="primary" id="cl-calc">Calculate</button></p>
+        <div id="cl-result"></div>
+      </div>`;
+
+    const resultDiv = section.querySelector('#cl-result');
+
+    section.querySelector('#cl-calc').addEventListener('click', () => {
+      if (!PlantState.mill) {
+        resultDiv.innerHTML = '<p class="error">Solve the Mill Floor tab first -- Clarification needs its mixed juice stream.</p>';
+        return;
+      }
+      try {
+        const v = readFields(section, [
+          'cl-filter_wash_water_pct_on_cane', 'cl-filter_cake_pct_on_cane', 'cl-filter_cake_pol_pct',
+          'cl-clarified_juice_purity', 'cl-limed_juice_cold_temp_f', 'cl-limed_juice_hot_temp_f',
+          'cl-clarified_juice_temp_f', 'cl-lime_lb_per_ton_cane', 'cl-lime_baume',
+          'cl-polymer_conc_ppm', 'cl-polymer_lb_per_ton_cane', 'cl-clarifier_underflow_pct_cane',
+        ]);
+
+        const clar = new Clarification({
+          mixed_juice_stream: PlantState.mill.mixed_juice_stream,
+          cane_tpd: PlantState.mill.cane_tpd,
+          filter_wash_water_pct_on_cane: v['cl-filter_wash_water_pct_on_cane'],
+          filter_cake_pct_on_cane: v['cl-filter_cake_pct_on_cane'],
+          filter_cake_pol_pct: v['cl-filter_cake_pol_pct'],
+          clarified_juice_purity: v['cl-clarified_juice_purity'],
+          limed_juice_cold_temp_f: v['cl-limed_juice_cold_temp_f'],
+          limed_juice_hot_temp_f: v['cl-limed_juice_hot_temp_f'],
+          clarified_juice_temp_f: v['cl-clarified_juice_temp_f'],
+          lime_lb_per_ton_cane: v['cl-lime_lb_per_ton_cane'],
+          lime_baume: v['cl-lime_baume'],
+          polymer_conc_ppm: v['cl-polymer_conc_ppm'],
+          polymer_lb_per_ton_cane: v['cl-polymer_lb_per_ton_cane'],
+          clarifier_underflow_pct_cane: v['cl-clarifier_underflow_pct_cane'],
+          name: 'Clarification',
+        });
+
+        PlantState.clar = clar;
+        const cj = clar.clarified_juice_stream;
+
+        const metrics = `
+          <div class="metrics">
+            <div class="metric"><div class="metric-label">Clarified juice flow</div><div class="metric-value">${fmt(cj.flow_lb_per_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">Clarified juice brix / purity</div><div class="metric-value">${fmt(cj.brix, 2)}% / ${fmt(cj.purity, 1)}%</div></div>
+            <div class="metric"><div class="metric-label">Flash vapor</div><div class="metric-value">${fmt(clar.flash_vapor_pct, 3)}%</div></div>
+            <div class="metric"><div class="metric-label">Filter cake pol loss</div><div class="metric-value">${fmt(clar.filter_cake_pol_lb_per_day, 0)} lb/day</div></div>
+          </div>`;
+
+        const streamRows = clar._collect_streams().map((r) => [
+          r[0], r[1], r[2], fmt(r[3], 0), fmt(r[4], 0), fmt(r[5], 0), fmt(r[6], 0),
+          fmt(r[7], 2), fmt(r[8], 2), r[9] === null ? '-' : fmt(r[9], 1), fmt(r[10], 2),
+          r[11] === null ? '-' : fmt(r[11], 0),
+        ]);
+        const streamTable = renderTable(
+          ['#', 'Stream', 'Dir', 'lb/hr', 'GPM', 'Brix lb/hr', 'Pol lb/hr', 'Brix %', 'Pol %', 'Purity %', '% on Cane', 'F'],
+          streamRows,
+        );
+
+        const bal = clar.balance_check;
+        const balRows = ['lb_per_hr', 'brix_lb_per_hr', 'pol_lb_per_hr'].map((k) => [
+          k, fmt(bal.in[k], 2), fmt(bal.out[k], 2), fmt(bal.difference[k], 4),
+        ]);
+        const balTable = renderTable(['Quantity', 'In', 'Out', 'Diff'], balRows);
+
+        resultDiv.innerHTML = metrics +
+          '<h3 class="section-title">Stream Table (tags match the diagram)</h3>' + streamTable +
+          '<h3 class="section-title">Balance Check</h3>' + balTable;
+      } catch (e) {
+        resultDiv.innerHTML = `<p class="error">${e.message}</p>`;
+      }
+    });
+
+    if (PlantState.mill) section.querySelector('#cl-calc').click();
+  }
+
+  // ---------------------------------------------------------------------
+  // Turbines & Boiler tab
+  //
+  // Mirrors streamlit_app.py's "Turbines & Boiler" tab (Cane Prep / Mill /
+  // Auxiliary turbine groups + the boiler room), with the Deaerator folded
+  // in directly rather than living on its own "Exhaust Summary" tab -- that
+  // tab's total exhaust demand is the sum of Juice Heating, Pan Floor, and
+  // Evaporation's steam consumption, none of which are ported yet. Until
+  // they are, "Additional Exhaust Required" below is a manual placeholder
+  // input standing in for that sum; the Deaerator's own steam demand is
+  // still added on top of it exactly as Boiler.py's real pipeline does.
+  // ---------------------------------------------------------------------
+  const KNF_COLS = [
+    { key: 'name', label: 'Name', type: 'text' },
+    { key: 'hp_tfh', label: 'HP per Ton Fiber/hr', step: 0.5 },
+    { key: 'eff', label: 'Isentropic Eff (%)', step: 1 },
+  ];
+  const MILL_COLS = [
+    { key: 'hp_tfh', label: 'HP per Ton Fiber/hr', step: 0.5 },
+    { key: 'eff', label: 'Isentropic Eff (%)', step: 1 },
+  ];
+  const AUX_COLS = [
+    { key: 'name', label: 'Name', type: 'text' },
+    { key: 'hp', label: 'HP', step: 5 },
+    { key: 'eff', label: 'Isentropic Eff (%)', step: 1 },
+  ];
+  const AUX_DEFAULTS = [
+    ['ID 123', 750], ['ID 4', 235], ['ID 5', 400], ['ID 6', 795], ['ID 7', 1200],
+    ['FD 7', 233], ['ID 8', 1300], ['FD 8', 350],
+    ['BFW 1', 400], ['BFW 2', 400], ['BFW 3', 400], ['JCE 1', 400],
+  ];
+
+  function buildTurbTab() {
+    const section = document.getElementById('tab-turb');
+    if (!PlantState.mill) {
+      section.innerHTML = '<div class="panel"><p class="error">Solve the Mill Floor tab first -- the turbine groups need the fiber rate.</p></div>';
+      return;
+    }
+
+    const numMills = PlantState.mill.number_of_mills;
+    const millHpDefaults = [18.0, 16.0, 16.0, 16.0, 16.0, 18.0];
+    const millRows0 = Array.from({ length: numMills }, (_, i) => ({
+      hp_tfh: i < millHpDefaults.length ? millHpDefaults[i] : 16.0,
+      eff: 50,
+    }));
+    const knfRows0 = [
+      { name: 'Knife 1', hp_tfh: 16.0, eff: 50 },
+      { name: 'Knife 2', hp_tfh: 16.0, eff: 50 },
+      { name: 'Knife 3', hp_tfh: 16.0, eff: 50 },
+    ];
+    const auxRows0 = AUX_DEFAULTS.map(([name, hp]) => ({ name, hp, eff: 50 }));
+
+    section.innerHTML = `
+      <div class="panel">
+        <h2>Live Steam Generation</h2>
+        <p class="note">The boiler header condition used as the enthalpy source for every turbine group below (throttled to each group's own inlet pressure).</p>
+        <div class="grid">
+          ${inputField('tb-live_gen_psig', 'Live steam generated (psig)', 185.0, 5)}
+          ${inputField('tb-live_gen_superheat', 'Superheat (F above sat, 0 = saturated)', 0.0, 5)}
+          ${inputField('tb-live_gen_quality', 'Quality (used if superheat = 0)', 1.0, 0.01)}
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Cane Prep (Knife) Turbines</h2>
+        <div class="grid">
+          ${inputField('tb-knf_live_psig', 'Knife live steam (psig)', 165.0, 5)}
+          ${inputField('tb-knf_exh_psig', 'Knife exhaust (psig)', 16.0, 1)}
+        </div>
+        ${editableRowsTable('tb-knf', KNF_COLS, knfRows0)}
+      </div>
+
+      <div class="panel">
+        <h2>Mill Turbines</h2>
+        <div class="grid">
+          ${inputField('tb-mill_live_psig', 'Mill live steam (psig)', 170.0, 5)}
+          ${inputField('tb-mill_exh_psig', 'Mill exhaust (psig)', 15.0, 1)}
+        </div>
+        ${editableRowsTable('tb-mill', MILL_COLS, millRows0)}
+      </div>
+
+      <div class="panel">
+        <h2>Auxiliary Turbines (fans, pumps, misc.)</h2>
+        <div class="grid">
+          <div><label for="tb-aux_group_name">Group name</label><input id="tb-aux_group_name" type="text" value="Fan and Pump Turbines"></div>
+          ${inputField('tb-aux_live_psig', 'Aux live steam (psig)', 170.0, 5)}
+          ${inputField('tb-aux_exh_psig', 'Aux exhaust (psig)', 16.0, 1)}
+        </div>
+        ${editableRowsTable('tb-aux', AUX_COLS, auxRows0)}
+      </div>
+
+      <div class="panel">
+        <h2>Losses &amp; Jets</h2>
+        <div class="grid">
+          ${inputField('tb-jets_lb_hr', 'Live steam for jets (lb/hr)', 25000.0, 1000)}
+          ${inputField('tb-loss_pct', 'Live steam losses (% of subtotal)', 2.0, 0.5)}
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Boiler Room</h2>
+        <div class="grid">
+          ${inputField('tb-blr_efficiency', 'Boiler efficiency (%)', 60.0, 1)}
+          ${inputField('tb-blr_pressure_psig', 'Boiler pressure (psig)', 185.0, 5)}
+          ${inputField('tb-blr_superheat', 'Boiler superheat (F)', 0.0, 5)}
+          ${inputField('tb-blr_capacity', 'Boiler capacity (lb/hr, 0 = unlimited)', 900000.0, 10000)}
+          ${checkboxField('tb-use_da_fw_temp', 'Feedwater temp = Deaerator water out', true)}
+          ${inputField('tb-manual_fw_temp', 'Feedwater temp (F, used if unchecked)', 230.0, 5)}
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Deaerator</h2>
+        <p class="note">Not yet its own "Exhaust Summary" tab (that needs Juice Heating / Pan Floor / Evaporation, not ported yet) -- folded in here since the Boiler's feedwater temp can depend on it.</p>
+        <div class="grid">
+          ${inputField('tb-da_psig', 'Deaerator pressure (psig)', 10.0, 1)}
+          ${inputField('tb-da_water_temp', 'Water in temp (F)', 200.0, 5)}
+          ${inputField('tb-da_water_flow', 'Water in flow (lb/hr)', 800000.0, 10000)}
+          ${inputField('tb-da_vent_pct', 'Vent (%)', 4.0, 0.5)}
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Exhaust Demand</h2>
+        <p class="note">"Additional exhaust required" stands in for Juice Heating / Pan Floor / Evaporation's steam consumption until those stages are ported -- see PROGRESS.md. The Deaerator's own steam demand is added on top of it automatically.</p>
+        <div class="grid">
+          ${inputField('tb-additional_exhaust', 'Additional exhaust required (lb/hr)', 0.0, 10000)}
+        </div>
+      </div>
+
+      <p><button class="primary" id="tb-calc">Calculate</button></p>
+      <div id="tb-result"></div>`;
+
+    const resultDiv = section.querySelector('#tb-result');
+
+    section.querySelector('#tb-calc').addEventListener('click', () => {
+      try {
+        const v = readFields(section, [
+          'tb-live_gen_psig', 'tb-live_gen_superheat', 'tb-live_gen_quality',
+          'tb-knf_live_psig', 'tb-knf_exh_psig', 'tb-mill_live_psig', 'tb-mill_exh_psig',
+          'tb-aux_live_psig', 'tb-aux_exh_psig', 'tb-jets_lb_hr', 'tb-loss_pct',
+          'tb-blr_efficiency', 'tb-blr_pressure_psig', 'tb-blr_superheat', 'tb-blr_capacity',
+          'tb-manual_fw_temp', 'tb-da_psig', 'tb-da_water_temp', 'tb-da_water_flow',
+          'tb-da_vent_pct', 'tb-additional_exhaust',
+        ]);
+        const aux_group_name = section.querySelector('#tb-aux_group_name').value;
+        const use_da_fw_temp = section.querySelector('#tb-use_da_fw_temp').checked;
+
+        const knfRows = readEditableRows(section, 'tb-knf', KNF_COLS, knfRows0.length);
+        const millRows = readEditableRows(section, 'tb-mill', MILL_COLS, millRows0.length);
+        const auxRows = readEditableRows(section, 'tb-aux', AUX_COLS, auxRows0.length);
+
+        const tons_fiber_hr = (PlantState.mill.cane_fiber_pct / 100) * PlantState.mill.cane_tph;
+
+        const live_gen_psia = v['tb-live_gen_psig'] + 14.696;
+        const live_steam_sat = new SteamStream({ P: live_gen_psia, x: 1 });
+        const live_steam_gen = v['tb-live_gen_superheat'] > 0
+          ? new SteamStream({ P: live_gen_psia, T: live_steam_sat.T + v['tb-live_gen_superheat'] })
+          : new SteamStream({ P: live_gen_psia, x: v['tb-live_gen_quality'] });
+        const groupSteam = (psig) => new SteamStream({ P: psig + 14.696, h: live_steam_gen.h });
+
+        const knf_trbs = new CanePrepTurbines({
+          name_list: knfRows.map((r) => r.name),
+          hp_ton_fiber_hr: knfRows.map((r) => r.hp_tfh),
+          isentropic_efficiency: knfRows.map((r) => r.eff),
+          live_steam_object: groupSteam(v['tb-knf_live_psig']),
+          exhaust_psia: v['tb-knf_exh_psig'] + 14.696,
+          tons_fiber_hr,
+        });
+        const mill_trbs = new MillTurbines({
+          hp_ton_fiber_hr: millRows.map((r) => r.hp_tfh),
+          isentropic_efficiency: millRows.map((r) => r.eff),
+          live_steam_object: groupSteam(v['tb-mill_live_psig']),
+          exhaust_psia: v['tb-mill_exh_psig'] + 14.696,
+          tons_fiber_hr,
+        });
+        const misc_trbs = new AuxillaryTurbines({
+          group_name: aux_group_name,
+          name_list: auxRows.map((r) => r.name),
+          hp_list: auxRows.map((r) => r.hp),
+          isentropic_efficiency: auxRows.map((r) => r.eff),
+          live_steam_object: groupSteam(v['tb-aux_live_psig']),
+          exhaust_psia: v['tb-aux_exh_psig'] + 14.696,
+        });
+
+        const live_steam_subtotal = knf_trbs.total_inlet_flow_lb_hr + mill_trbs.total_inlet_flow_lb_hr
+          + misc_trbs.total_inlet_flow_lb_hr + v['tb-jets_lb_hr'];
+        const live_steam_loss_lb_hr = (live_steam_subtotal * v['tb-loss_pct']) / 100;
+        const live_steam_total_lb_hr = live_steam_subtotal + live_steam_loss_lb_hr;
+        const exhaust_available = knf_trbs.total_exhaust_available_lb_hr + mill_trbs.total_exhaust_available_lb_hr
+          + misc_trbs.total_exhaust_available_lb_hr;
+
+        const da = new Deaerator({
+          deaerator_psig: v['tb-da_psig'],
+          water_in_deg_F: v['tb-da_water_temp'],
+          water_in_lb_hr: v['tb-da_water_flow'],
+          vent_pct: v['tb-da_vent_pct'],
+        });
+
+        const total_exhaust_required = v['tb-additional_exhaust'] + da.steam_flow_lb_hr;
+        const makeup_steam = Math.max(total_exhaust_required - exhaust_available, 0);
+
+        const fw_temp = use_da_fw_temp ? da.water_out.T : v['tb-manual_fw_temp'];
+        const blrs = new Boiler({
+          bagasse: PlantState.mill.bagasse_stream,
+          efficiency: v['tb-blr_efficiency'],
+          pressure_psig: v['tb-blr_pressure_psig'],
+          deg_superheat: v['tb-blr_superheat'],
+          feed_water_temp: fw_temp,
+          capacity: v['tb-blr_capacity'],
+          name: 'All Boilers',
+        });
+
+        PlantState.turb = { knf_trbs, mill_trbs, misc_trbs, blrs, da };
+
+        const liveSteamTable = renderTable(['Item', 'lb/hr'], [
+          ['Cane Prep Turbines', fmt(knf_trbs.total_inlet_flow_lb_hr, 0)],
+          ['Mill Turbines', fmt(mill_trbs.total_inlet_flow_lb_hr, 0)],
+          [aux_group_name, fmt(misc_trbs.total_inlet_flow_lb_hr, 0)],
+          ['Steam Jets', fmt(v['tb-jets_lb_hr'], 0)],
+          ['Live Steam Losses', fmt(live_steam_loss_lb_hr, 0)],
+          ['Total Live Steam', fmt(live_steam_total_lb_hr, 0)],
+        ]);
+
+        const metrics = `
+          <div class="metrics">
+            <div class="metric"><div class="metric-label">Total Live Steam Demand</div><div class="metric-value">${fmt(live_steam_total_lb_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">Exhaust Required</div><div class="metric-value">${fmt(total_exhaust_required, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">Exhaust Available from Turbines</div><div class="metric-value">${fmt(exhaust_available, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">Makeup Required</div><div class="metric-value">${fmt(makeup_steam, 0)} lb/hr</div></div>
+          </div>
+          <div class="metrics">
+            <div class="metric"><div class="metric-label">Steam Available from Bagasse</div><div class="metric-value">${fmt(blrs.steam_availabe_lb_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">Live Steam Demand vs. Available</div><div class="metric-value">${fmt(live_steam_total_lb_hr, 0)} / ${fmt(blrs.steam_availabe_lb_hr, 0)} lb/hr</div></div>
+          </div>`;
+
+        const fw = blrs.feed_water_stream;
+        const st = blrs.steam_stream;
+        const condition = blrs.deg_sh > 0 ? 'Superheated' : 'Saturated';
+        const bg = blrs.bagasse;
+
+        const boilerParamsTable = renderTable(['Parameter', 'Value'], [
+          ['Efficiency (%)', fmt(blrs.efficiency, 2)],
+          ['Pressure (psig)', fmt(blrs.psia - 14.696, 2)],
+          ['Pressure (psia)', fmt(blrs.psia, 2)],
+          ['Feed water temp (F)', fmt(blrs.feed_wat_temp, 2)],
+          ['Superheat (F above sat)', fmt(blrs.deg_sh, 2)],
+          ['Rated capacity (lb/hr)', fmt(blrs.capacity, 2)],
+        ]);
+        const boilerStreamsTable = renderTable(['Stream', 'Temp (F)', 'Enthalpy (BTU/lb)', 'Condition'], [
+          ['Feed Water', fmt(fw.T, 2), fmt(fw.h, 2), ''],
+          ['Steam Out', fmt(st.T, 2), fmt(st.h, 2), condition],
+        ]);
+        const boilerFuelTable = renderTable(['Fuel Property', 'Value'], [
+          ['Flowrate (lb/hr)', fmt(bg.flowrate_lb_hr, 2)],
+          ['Fiber (%)', fmt(bg.fiber_pct, 2)],
+          ['Moisture (%)', fmt(bg.moisture_pct, 2)],
+          ['Brix (%)', fmt(bg.brix_pct, 2)],
+          ['Pol (%)', fmt(bg.pol_pct, 2)],
+          ['Ash (%)', fmt(bg.ash_pct, 2)],
+          ['GCV (BTU/lb)', fmt(bg.gcv, 2)],
+        ]);
+        const boilerPerfTable = renderTable(['Metric', 'Value'], [
+          ['Heat to make 1 lb steam (BTU/lb)', fmt(blrs.btu_for_1_lb, 2)],
+          ['Steam/Bagasse ratio (lb/lb)', fmt(blrs.steam_available_per_lb_bagasse, 4)],
+          ['Steam available from bagasse (lb/hr)', fmt(blrs.steam_availabe_lb_hr, 2)],
+        ]);
+
+        const daTable = renderTable(['Stream', 'Flow (lb/hr)', 'P (psia)', 'Temp (F)'], [
+          ['Steam In', fmt(da.steam_flow_lb_hr, 0), fmt(da.psia, 2), fmt(da._steam_state.T, 1)],
+          ['Feedwater In', fmt(da.water_in_lb_hr, 0), '14.70', fmt(da.water_in_deg_F, 1)],
+          ['Water Out', fmt(da.water_out_flow_lb_hr, 0), fmt(da.psia, 2), fmt(da._water_out_state.T, 1)],
+          ['Vent', fmt(da.vent_flow_lb_hr, 0), '14.70', fmt(da._water_out_state.T, 1)],
+        ]);
+
+        const knfTfh = knfRows.map((r) => r.hp_tfh);
+        const auxHp = auxRows.map((r) => r.hp);
+
+        resultDiv.innerHTML = liveSteamTable + metrics +
+          '<h3 class="section-title">Boiler -- Parameters</h3>' + boilerParamsTable +
+          '<h3 class="section-title">Boiler -- Feed Water / Steam</h3>' + boilerStreamsTable +
+          '<h3 class="section-title">Boiler -- Bagasse Fuel</h3>' + boilerFuelTable +
+          '<h3 class="section-title">Boiler -- Performance</h3>' + boilerPerfTable +
+          '<h3 class="section-title">Deaerator -- Streams</h3>' + daTable +
+          '<h3 class="section-title">Cane Prep (Knife) Turbines -- Output</h3>' +
+          turbineGroupTable(knf_trbs, { tfhList: knfTfh, skip: knfTfh.map((x) => x === 0) }) +
+          '<h3 class="section-title">Mill Turbines -- Output</h3>' +
+          turbineGroupTable(mill_trbs, { tfhList: millRows.map((r) => r.hp_tfh) }) +
+          `<h3 class="section-title">${aux_group_name} -- Output</h3>` +
+          turbineGroupTable(misc_trbs, { skip: auxHp.map((x) => x === 0) });
+      } catch (e) {
+        resultDiv.innerHTML = `<p class="error">${e.message}</p>`;
+      }
+    });
+
+    section.querySelector('#tb-calc').click();
+  }
+
+  // ---------------------------------------------------------------------
+  // Juice Heating tab
+  //
+  // Mirrors streamlit_app.py's "Juice Heating" tab: a JuiceHeatingStation
+  // (series or parallel, chained off Clarification's limed_juice_cold_stream)
+  // plus a standalone Clarified Juice Heater fed from clarified_juice_stream.
+  // ---------------------------------------------------------------------
+  const STEAM_TYPES = ['Exhaust', 'V1', 'V2', 'V3', 'V4'];
+  const DEFAULT_V1_PSIA = 21;
+  const HEAT_COLS = [
+    { key: 'name', label: 'Group', type: 'text' },
+    { key: 'steam_type', label: 'Steam Type', type: 'select', options: STEAM_TYPES },
+    { key: 'psia', label: 'Steam Pressure (psia)', step: 1 },
+    { key: 'U', label: 'U (Btu/hr·ft²·°F)', step: 5 },
+    { key: 'area', label: 'Area (ft²)', step: 500 },
+  ];
+  const HEAT_COLS_PARALLEL = HEAT_COLS.concat([{ key: 'split_pct', label: 'Split %', step: 5 }]);
+
+  function heaterPerfRow(h) {
+    return [
+      h.name, STEAM_TYPES[h.steam_type], fmt(h.hot_stream.P, 2), fmt(h.hot_stream.T, 2),
+      fmt(h.hot_stream.h_fg, 2), fmt(h.steam_required_lb_per_hr, 2), fmt(h.U, 2),
+      fmt(h.installed_area_ft2, 2), fmt(h.required_area_ft2, 2), fmt(h.cold_stream.flow_lb_per_hr, 2),
+      fmt(h.cold_stream.temp_deg_F, 2), fmt(h.juice_out_temp_degF, 2), fmt(h.cold_stream.cp_btu_per_lb_deg_F, 2),
+      fmt(h.Q_btu_per_hr / 1e6, 2), fmt(h.LMTD_degF, 2),
+    ];
+  }
+  const HEATER_PERF_HEADERS = [
+    'Heater', 'Steam Type', 'Steam Pressure (psia)', 'Steam Temp (°F)', 'Steam hfg (BTU/lb)',
+    'Steam Flow (lb/hr)', 'U (Btu/hr·ft²·°F)', 'Area Installed (ft²)',
+    'Area Required (ft²)', 'Juice Flow In (lb/hr)', 'Juice Temp In (°F)', 'Juice Temp Out (°F)',
+    'Juice cp (Btu/lb·°F)', 'Duty (MM BTU/hr)', 'LMTD (deg F)',
+  ];
+
+  function buildHeatTab() {
+    const section = document.getElementById('tab-heat');
+    if (!PlantState.clar) {
+      section.innerHTML = '<div class="panel"><p class="error">Solve the Clarification tab first -- Juice Heating needs its limed/clarified juice streams.</p></div>';
+      return;
+    }
+
+    const clar = PlantState.clar;
+    const juice_T_out = clar.limed_juice_hot_temp_f;
+    const mode = (section.dataset.mode) || 'parallel';
+    const fabExhPsia = section.dataset.fabExhPsia ? parseFloat(section.dataset.fabExhPsia) : 30.0;
+    const cjhSteamType = section.dataset.cjhSteamType || 'Exhaust';
+
+    const heaterRows0 = [
+      { name: 'V1 Heaters', steam_type: 'V1', psia: DEFAULT_V1_PSIA, U: 200.0, area: 11000.0, split_pct: 75.0 },
+      { name: 'Exhaust Heaters', steam_type: 'Exhaust', psia: fabExhPsia, U: 200.0, area: 5000.0, split_pct: 25.0 },
+    ];
+
+    section.innerHTML = `
+      <div class="panel">
+        <h2>Juice Heating Station</h2>
+        <div class="grid">
+          <div><label>Flow arrangement</label>
+            <select id="ht-mode">
+              <option value="parallel"${mode === 'parallel' ? ' selected' : ''}>Parallel</option>
+              <option value="series"${mode === 'series' ? ' selected' : ''}>Series</option>
+            </select>
+          </div>
+          ${inputField('ht-fab_exh_psia', 'Fabrication exhaust pressure (psia)', fabExhPsia, 1)}
+        </div>
+        <p class="note">Juice from Clarification's limed juice cold stream (${fmt(clar.limed_juice_cold_stream.flow_lb_per_hr, 0)} lb/hr @ ${fmt(clar.limed_juice_cold_stream.temp_deg_F, 1)} °F).</p>
+        ${mode === 'series' ? `<div class="grid">
+          ${inputField('ht-primary_temp_out', `${heaterRows0[0].name} exit temp (°F)`, 180.0, 1)}
+          <div><label for="ht-secondary_temp_out">${heaterRows0[1].name} exit temp (°F) [locked]</label>
+            <input id="ht-secondary_temp_out" type="number" value="${juice_T_out}" disabled title="Fixed to Clarification's Limed juice hot temp input.">
+          </div>
+        </div>` : ''}
+        ${editableRowsTable('ht-heaters', mode === 'parallel' ? HEAT_COLS_PARALLEL : HEAT_COLS, heaterRows0)}
+      </div>
+
+      <div class="panel">
+        <h2>Clarified Juice Heater</h2>
+        <div class="grid">
+          <div><label>Steam type</label>
+            <select id="ht-cjh_steam_type">
+              <option value="Exhaust"${cjhSteamType === 'Exhaust' ? ' selected' : ''}>Exhaust</option>
+              <option value="V1"${cjhSteamType === 'V1' ? ' selected' : ''}>V1</option>
+            </select>
+          </div>
+          ${inputField('ht-cjh_temp', 'Juice out temp (°F)', 225.0, 1)}
+          ${inputField('ht-cjh_U', 'U (Btu/hr·ft²·°F)', 185.0, 5)}
+          ${inputField('ht-cjh_area', 'Area (ft²)', 6000.0, 500)}
+          ${inputField('ht-cjh_psia', 'Steam pressure (psia)', cjhSteamType === 'V1' ? DEFAULT_V1_PSIA : fabExhPsia, 1)}
+        </div>
+      </div>
+
+      <p><button class="primary" id="ht-calc">Calculate</button></p>
+      <div id="ht-result"></div>`;
+
+    section.querySelector('#ht-mode').addEventListener('change', (e) => {
+      section.dataset.mode = e.target.value;
+      buildHeatTab();
+    });
+    section.querySelector('#ht-fab_exh_psia').addEventListener('change', (e) => {
+      section.dataset.fabExhPsia = e.target.value;
+      buildHeatTab();
+    });
+    section.querySelector('#ht-cjh_steam_type').addEventListener('change', (e) => {
+      section.dataset.cjhSteamType = e.target.value;
+      buildHeatTab();
+    });
+
+    const resultDiv = section.querySelector('#ht-result');
+
+    section.querySelector('#ht-calc').addEventListener('click', () => {
+      try {
+        const heaterRows = readEditableRows(section, 'ht-heaters', mode === 'parallel' ? HEAT_COLS_PARALLEL : HEAT_COLS, heaterRows0.length);
+        const cjhTemp = parseFloat(section.querySelector('#ht-cjh_temp').value);
+        const cjhU = parseFloat(section.querySelector('#ht-cjh_U').value);
+        const cjhArea = parseFloat(section.querySelector('#ht-cjh_area').value);
+        const cjhPsia = parseFloat(section.querySelector('#ht-cjh_psia').value);
+        const cjhSteamTypeSel = section.querySelector('#ht-cjh_steam_type').value;
+
+        let temp_outs;
+        if (mode === 'series') {
+          const primaryTempOut = parseFloat(section.querySelector('#ht-primary_temp_out').value);
+          temp_outs = [primaryTempOut, juice_T_out];
+        } else {
+          temp_outs = heaterRows.map(() => juice_T_out);
+        }
+
+        const cold_juice = clar.limed_juice_cold_stream;
+        const heater_objs = heaterRows.map((row, i) => new JuiceHeaterShellTube({
+          cold_stream: cold_juice,
+          hot_stream: new SteamStream({ x: 1, P: row.psia }),
+          name: row.name,
+          juice_out_temp_degF: temp_outs[i],
+          U_btu_per_ft2_degF: row.U,
+          installed_area_ft2: row.area,
+          steam_type: STEAM_TYPES.indexOf(row.steam_type),
+        }));
+        const split_pcts = mode === 'parallel' ? heaterRows.map((r) => r.split_pct) : null;
+        const juice_heaters = new JuiceHeatingStation({
+          cold_stream: cold_juice, heaters: heater_objs, mode, split_pcts,
+          name: mode === 'parallel' ? 'Parallel Juice Heating Station' : 'Series Juice Heating Station',
+        });
+
+        const clar_juice_colder = SugarStream.copy(clar.clarified_juice_stream);
+        const clar_juice_heater = new JuiceHeaterShellTube({
+          cold_stream: clar_juice_colder,
+          hot_stream: new SteamStream({ x: 1, P: cjhPsia }),
+          name: 'Clarified Juice Heater',
+          juice_out_temp_degF: cjhTemp,
+          U_btu_per_ft2_degF: cjhU,
+          installed_area_ft2: cjhArea,
+          steam_type: STEAM_TYPES.indexOf(cjhSteamTypeSel),
+        });
+
+        PlantState.heat = { juice_heaters, clar_juice_heater };
+
+        const heaterPerfTable = renderTable(HEATER_PERF_HEADERS, juice_heaters.heaters.map(heaterPerfRow));
+
+        const metrics = `
+          <div class="metrics">
+            <div class="metric"><div class="metric-label">Juice out</div><div class="metric-value">${fmt(juice_heaters.juice_out.flow_lb_per_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">Exhaust</div><div class="metric-value">${fmt(juice_heaters.total_exhaust_steam_lb_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">V1</div><div class="metric-value">${fmt(juice_heaters.total_V1_steam_lb_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">V2</div><div class="metric-value">${fmt(juice_heaters.total_V2_steam_lb_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">V3</div><div class="metric-value">${fmt(juice_heaters.total_V3_steam_lb_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">V4</div><div class="metric-value">${fmt(juice_heaters.total_V4_steam_lb_hr, 0)} lb/hr</div></div>
+          </div>`;
+
+        const warnings = juice_heaters.heaters
+          .filter((h) => h.is_steam_hot_enough !== 'YES')
+          .map((h) => `<p class="error">WARNING [${h.name}]: ${h.is_steam_hot_enough}</p>`).join('');
+
+        const condensateTable = renderTable(['Item', 'lb/hr'], [
+          ['Clean condensate (Exhaust steam heaters)', fmt(juice_heaters.clean_condensate, 0)],
+          ['Dirty condensate (V1-V4 steam heaters)', fmt(juice_heaters.dirty_condensate, 0)],
+          ['Total condensate', fmt(juice_heaters.clean_condensate + juice_heaters.dirty_condensate, 0)],
+        ]);
+
+        const cjhPerfTable = renderTable(HEATER_PERF_HEADERS, [heaterPerfRow(clar_juice_heater)]);
+        const cjhMetrics = `
+          <div class="metrics">
+            <div class="metric"><div class="metric-label">Flow out</div><div class="metric-value">${fmt(clar_juice_heater.juice_out.flow_lb_per_hr, 0)} lb/hr</div></div>
+            <div class="metric"><div class="metric-label">Temp in</div><div class="metric-value">${fmt(clar_juice_heater.cold_stream.temp_deg_F, 1)} °F</div></div>
+            <div class="metric"><div class="metric-label">Temp out</div><div class="metric-value">${fmt(clar_juice_heater.juice_out.temp_deg_F, 1)} °F</div></div>
+            <div class="metric"><div class="metric-label">Steam required (${cjhSteamTypeSel})</div><div class="metric-value">${fmt(clar_juice_heater.steam_required_lb_per_hr, 0)} lb/hr</div></div>
+          </div>`;
+        const cjhWarning = clar_juice_heater.is_steam_hot_enough !== 'YES'
+          ? `<p class="error">WARNING [Clarified Juice Heater]: ${clar_juice_heater.is_steam_hot_enough}</p>` : '';
+
+        resultDiv.innerHTML =
+          '<h3 class="section-title">Juice Heater Performance</h3>' + heaterPerfTable + metrics + warnings +
+          '<h3 class="section-title">Condensate Return</h3>' + condensateTable +
+          '<h3 class="section-title">Clarified Juice Heater Performance</h3>' + cjhPerfTable + cjhMetrics + cjhWarning;
+      } catch (e) {
+        resultDiv.innerHTML = `<p class="error">${e.message}</p>`;
+      }
+    });
+
+    section.querySelector('#ht-calc').click();
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    buildTabs();
+    buildSteamTab();
+    buildMillTab();
+    buildClarTab();
+    buildHeatTab();
+    buildTurbTab();
+  });
+})();
+
+</script>
+</body>
+</html>
