@@ -1436,9 +1436,9 @@ def render_tab_turb():
         knf_live_psig = kg1.number_input("Knife live steam (psig)", value=165.0, step=5.0, key="knf_live")
         knf_exh_psig = kg2.number_input("Knife exhaust (psig)", value=16.0, step=1.0, key="knf_exh")
         knf_defaults = pd.DataFrame([
-            {"Name": "Knife 1", "HP per Ton Fiber/hr": 16.0, "Isentropic Eff (%)": 50.0},
-            {"Name": "Knife 2", "HP per Ton Fiber/hr": 16.0, "Isentropic Eff (%)": 50.0},
-            {"Name": "Knife 3", "HP per Ton Fiber/hr": 16.0, "Isentropic Eff (%)": 50.0},
+            {"Name": "Knife 1", "HP per Ton Fiber/hr": 14.0, "Isentropic Eff (%)": 50.0},
+            {"Name": "Knife 2", "HP per Ton Fiber/hr": 14.0, "Isentropic Eff (%)": 50.0},
+            {"Name": "Knife 3", "HP per Ton Fiber/hr": 14.0, "Isentropic Eff (%)": 50.0},
         ])
         knf_df = st.data_editor(knf_defaults, hide_index=True, use_container_width=True,
                                  num_rows="dynamic", key="knf_editor")
@@ -1447,7 +1447,7 @@ def render_tab_turb():
         mg1, mg2 = st.columns(2)
         mill_live_psig = mg1.number_input("Mill live steam (psig)", value=170.0, step=5.0, key="mill_live")
         mill_exh_psig = mg2.number_input("Mill exhaust (psig)", value=15.0, step=1.0, key="mill_exh")
-        mill_hp_defaults = [18.0, 16.0, 16.0, 16.0, 16.0, 18.0]
+        mill_hp_defaults = [11.0, 11.0, 11.0, 11.0, 11.0, 11.0]
         mill_defaults = pd.DataFrame([
             {"HP per Ton Fiber/hr": mill_hp_defaults[i] if i < len(mill_hp_defaults) else 16.0,
              "Isentropic Eff (%)": 50.0}
