@@ -387,4 +387,169 @@ def recommend_equipment(mills, clarifiers, heaters, pres, sets, pans, cooling, s
         '20% throughput margin; six mills/tandem; roll geometry requires fiber loading and speed')
     for i, heater in enumerate(heaters, 1):
         area = rounded(MARGIN*heater.required_area_ft2, 500)
-        row(f'Heater stage {i} ({"V2" if i==1 else "V1"})', f'{heater.required_area_ft2:,.0f}
+        row(f'Heater stage {i} ({"V2" if i == 1 else "V1"})',
+            f'{heater.required_area_ft2:,.0f} ft2', f'{area:,.0f} ft2 installed',
+            '20% surface margin; U = 220 BTU/hr-ft2-F')
+    row('Clarification station', f'{clarifiers.clarified_juice_stream.flow_lb_per_hr:,.0f} lb/hr clarified juice',
+        'Vendor hydraulic sizing required',
+        'Balance fixes flows only; settling area and retention time are not modeled')
+    for i, pre in enumerate(pres, 1):
+        row(f'Pre-evaporator {i} (2)', f'{pre.area_ft2:,.0f} ft2 effective surface',
+            f'{rounded(MARGIN*pre.area_ft2, 1000):,.0f} ft2 installed',
+            '20% surface margin at imposed V1 pressure')
+    for evap in sets:
+        areas = [body.area_ft2 for body in evap.evaporator_list]
+        row(evap.name, ' / '.join(f'{a:,.0f}' for a in areas) + ' ft2 by effect',
+            ' / '.join(f'{rounded(MARGIN*a, 500):,.0f}' for a in areas) + ' ft2 installed',
+            '20% surface margin; calculated areas remain in the process balance')
+    for pan in pans._pans:
+        row(pan.name, f'{pan.heating_surface_ft2:,.0f} ft2 effective surface',
+            f'{rounded(MARGIN*pan.heating_surface_ft2, 500):,.0f} ft2 installed',
+            '20% surface margin; cycle time and vessel volume require vendor sizing')
+    row('Cooling-water system', f'{cooling.total_heat_load_btu_hr/1e6:,.1f} MMBTU/hr',
+        f'{rounded(cooling.total_injection_water_lb_hr/8.33/60, 500):,.0f} gpm circulation',
+        'Condenser injection demand rounded to 500 gpm')
+    row('Dedicated HP boiler', f'{steam["hp_steam"]:,.0f} lb/hr at 600 psig',
+        f'{MARGIN*steam["hp_steam"]:,.0f} lb/hr MCR', '20% steam-capacity margin')
+    row('LP boiler bank', f'{steam["lp_boiler"]:,.0f} lb/hr at 250 psig',
+        f'{MARGIN*steam["lp_boiler"]:,.0f} lb/hr MCR', '20% steam-capacity margin')
+    return rows
+
+
+def build_balance():
+    """Build and validate the Example 3 process balance."""
+    mills = [
+        MillFloor(
+            cane_tpd=CANE_TPD/2, cane_pol_pct=13.5, cane_fiber_pct=14.5,
+            bagasse_moisture_pct=49.5, bagasse_pol_pct=2.2, bagasse_ash_pct=5,
+            imbibition_pct_on_cane=30, mix_juice_purity=86,
+            last_roll_purity=70, number_of_mills=6,
+            mill_1_fiber_rise_load_fraction=0.35, name=f'Milling Tandem {i}',
+        ) for i in (1, 2)
+    ]
+    mixed_juice = SugarStream.copy(mills[0].mixed_juice_stream)
+    mixed_juice.flow_lb_per_hr = sum(m.mixed_juice_stream.flow_lb_per_hr for m in mills)
+    clarifiers = Clarification(
+        mixed_juice_stream=mixed_juice, cane_tpd=CANE_TPD,
+        filter_cake_pct_on_cane=5, filter_cake_pol_pct=2,
+        filter_wash_water_pct_on_cane=5, clarified_juice_purity=86.5,
+        clarified_juice_temp_f=205, limed_juice_cold_temp_f=90,
+        limed_juice_hot_temp_f=220, lime_baume=10,
+        lime_lb_per_ton_cane=1.3, polymer_conc_ppm=5000,
+        polymer_lb_per_ton_cane=0.045, clarifier_underflow_pct_cane=20,
+        name='Shared Clarification and Mud Filters',
+    )
+    primary = JuiceHeaterShellTube(
+        cold_stream=clarifiers.limed_juice_cold_stream,
+        hot_stream=SteamStream(P=V2_PSIA, x=1), name='Primary V2 Heaters',
+        juice_out_temp_degF=170, U_btu_per_ft2_degF=220,
+        installed_area_ft2=1, steam_type=2,
+    )
+    secondary = JuiceHeaterShellTube(
+        cold_stream=primary.juice_out, hot_stream=SteamStream(P=V1_PSIA, x=1),
+        name='Secondary V1 Heaters', juice_out_temp_degF=220,
+        U_btu_per_ft2_degF=220, installed_area_ft2=1, steam_type=1,
+    )
+
+    syrup = SugarStream.copy(clarifiers.clarified_juice_stream)
+    syrup.evaporate(new_brix=63, new_temp=sat_steam_temp(LAST_EFFECT_PSIA))
+    pans = make_pan_floor(syrup)
+    v1_demand = secondary.steam_required_lb_per_hr + pans.total_V1_steam_lb_hr
+    v2_demand = primary.steam_required_lb_per_hr + pans.total_V2_steam_lb_hr
+
+    pre_feed = SugarStream.copy(clarifiers.clarified_juice_stream)
+    pre_feed.flow_lb_per_hr /= 2
+    pres = [size_pre(SugarStream.copy(pre_feed), v1_demand/2) for _ in range(2)]
+    set_feed = SugarStream.copy(pres[0].juice_out)
+    set_feed.flow_lb_per_hr /= 2
+    sets = [
+        size_set('Quadruple Set 1', SugarStream.copy(set_feed), 4, v2_demand/4),
+        size_set('Quadruple Set 2', SugarStream.copy(set_feed), 4, v2_demand/4),
+        size_set('Triple Set 1', SugarStream.copy(set_feed), 3, v2_demand/4),
+        size_set('Triple Set 2', SugarStream.copy(set_feed), 3, v2_demand/4),
+    ]
+    process_exhaust = (sum(p.exhaust_required_lb_per_hr for p in pres)
+                       + sum(e.supply_steam.flow_lb_per_hr for e in sets)
+                       + pans.total_exhaust_steam_lb_hr)
+    steam = steam_and_fuel(mills, process_exhaust)
+    condensers = list(pans.pan_condensers)
+    condensers.extend((e.name, e.condenser) for e in sets)
+    cooling = CoolingTowerSystem(
+        condensers=condensers, cool_water_temp_F=85, percent_blowdown=10,
+        makeup_water_temp_F=70, iterations=20, name='Cooling Tower System',
+    )
+
+    combined_syrup = sum(e.evaporator_list[-1].juice_side_out.flow_lb_per_hr for e in sets)
+    require_close('Evaporator syrup flow', combined_syrup, syrup.flow_lb_per_hr, atol=2.)
+    require_close('V1 allocation', sum(p.vapor_bleed_lb_per_hr for p in pres), v1_demand)
+    require_close('V2 allocation', sum(e.vapor_bleeds[1] for e in sets), v2_demand)
+    require_close('Cooling tower water balance', cooling.balance_check['diff_lb_hr'], 0., atol=1.)
+    return dict(mills=mills, clarifiers=clarifiers, heaters=[primary, secondary],
+                pres=pres, sets=sets, pans=pans, cooling=cooling, steam=steam,
+                syrup=syrup, v1_demand=v1_demand, v2_demand=v2_demand,
+                process_exhaust=process_exhaust)
+
+
+def print_balance(model):
+    mills, clar, pans, steam = (model[k] for k in ('mills', 'clarifiers', 'pans', 'steam'))
+    sugar = pans.total_raw_sugar
+    final_molasses = pans._final_molasses_out
+    print('\nEXAMPLE 3 -- FACTORY BALANCE')
+    print('=' * 78)
+    print(f'Cane                         {sum(m.cane_lb_hr for m in mills):>14,.0f} lb/hr')
+    print(f'Mixed juice                  {sum(m.mixed_juice_stream.flow_lb_per_hr for m in mills):>14,.0f} lb/hr')
+    print(f'Clarified juice              {clar.clarified_juice_stream.flow_lb_per_hr:>14,.0f} lb/hr')
+    print(f'Syrup at 63 Brix             {model["syrup"].flow_lb_per_hr:>14,.0f} lb/hr')
+    print(f'Raw sugar                    {sugar.flow_lb_per_hr:>14,.0f} lb/hr')
+    print(f'Final molasses               {final_molasses.flow_lb_per_hr:>14,.0f} lb/hr')
+    print(f'V1 demand                    {model["v1_demand"]:>14,.0f} lb/hr')
+    print(f'V2 demand                    {model["v2_demand"]:>14,.0f} lb/hr')
+    print(f'Process exhaust              {model["process_exhaust"]:>14,.0f} lb/hr')
+    print(f'Total live steam             {steam["live_required"]:>14,.0f} lb/hr')
+    print(f'HP boiler steam              {steam["hp_steam"]:>14,.0f} lb/hr')
+    print(f'LP boiler steam              {steam["lp_boiler"]:>14,.0f} lb/hr')
+    print(f'Bagasse available            {steam["bagasse_available"]:>14,.0f} lb/hr')
+    print(f'Bagasse surplus/(deficit)    {steam["bagasse_surplus"]:>14,.0f} lb/hr')
+    print(f'Cooling tower makeup         {model["cooling"].makeup_lb_hr:>14,.0f} lb/hr')
+
+
+def print_recommendations(rows):
+    print('\nPRELIMINARY EQUIPMENT RECOMMENDATIONS')
+    print('=' * 78)
+    for item, duty, size, basis in rows:
+        print(f'\n{item}\n  Required:  {duty}\n  Suggested: {size}\n  Basis:     {basis}')
+
+
+def print_details(model):
+    for mill in model['mills']:
+        mill.neat_display()
+    model['clarifiers'].neat_display()
+    for heater in model['heaters']:
+        heater.neat_display()
+    for i, pre in enumerate(model['pres'], 1):
+        print(f'\nPRE-EVAPORATOR {i}')
+        pre.display_properties()
+    for evap in model['sets']:
+        evap.neat_display()
+    model['pans'].neat_display()
+    model['cooling'].neat_display()
+
+
+def main(argv=None):
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[1])
+    parser.add_argument('--details', action='store_true',
+                        help='print detailed station reports in addition to summary output')
+    args = parser.parse_args(argv)
+    model = build_balance()
+    print_balance(model)
+    print_recommendations(recommend_equipment(
+        model['mills'], model['clarifiers'], model['heaters'], model['pres'],
+        model['sets'], model['pans'], model['cooling'], model['steam']))
+    if args.details:
+        print_details(model)
+
+
+if __name__ == '__main__':
+    main()
