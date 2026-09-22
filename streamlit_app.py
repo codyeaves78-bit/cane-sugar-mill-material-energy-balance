@@ -67,7 +67,7 @@ st.set_page_config(page_title="Factory Balance Trial", layout="wide")
 st.title("Cane Sugar Factory Material & Energy Balance")
 st.caption("Trial Streamlit walkthrough: Mill Floor → Clarification → Juice Heating → "
            "Pan Floor → Evaporation → Steam & Exhaust Summary.")
-st.caption("Version 0.1")
+st.caption("Version 1.0 - last update 9/22/2026")
 st.caption("Creator: Cody Eaves")
 
 # ============================================================================
@@ -247,6 +247,29 @@ def turbine_group_table(group):
     return df
 
 
+def bagasse_report_table(bagasse_from_mills_lb_hr, bagasse_burned_lb_hr, bulk_density_lb_ft3):
+    """Return mill, boiler-use, and excess bagasse on a common reporting basis."""
+    if bulk_density_lb_ft3 <= 0:
+        raise ValueError("Bagasse bulk density must be greater than zero.")
+    excess_lb_hr = bagasse_from_mills_lb_hr - bagasse_burned_lb_hr
+    rows = [
+        ("Bagasse from mills", bagasse_from_mills_lb_hr),
+        ("Bagasse burned in boilers", bagasse_burned_lb_hr),
+        ("Excess bagasse", excess_lb_hr),
+    ]
+    return pd.DataFrame([
+        {
+            "Bagasse stream": label,
+            "Ton/hr": flow_lb_hr / 2000,
+            "TPD": flow_lb_hr * 24 / 2000,
+            "lb/hr": flow_lb_hr,
+            "Assumed bulk density (lb/ft³)": bulk_density_lb_ft3,
+            "Estimated volume (yd³/day)": flow_lb_hr * 24 / bulk_density_lb_ft3 / 27,
+        }
+        for label, flow_lb_hr in rows
+    ])
+
+
 # ============================================================================
 # SIDEBAR — MILL FLOOR + CLARIFICATION
 # ============================================================================
@@ -384,11 +407,11 @@ bag = mills.bagasse_stream
 cj = clar.clarified_juice_stream
 
 
-(tab_mill, tab_clar, tab_heat, tab_pan, tab_evap, tab_steam, tab_turb, tab_cool,
- tab_cond, tab_dl, tab_pfd) = st.tabs([
+(tab_mill, tab_clar, tab_heat, tab_pan, tab_evap, tab_steam, tab_turb, tab_bagasse,
+ tab_cool, tab_cond, tab_dl, tab_pfd) = st.tabs([
     "Mill Floor", "Clarification", "Juice Heating", "Pan Floor",
-    "Evaporation", "Exhaust Summary", "Turbines & Boiler", "Cooling Tower",
-    "Condensate Balance", "Download", "Check Process Flow Diagrams"
+    "Evaporation", "Exhaust Summary", "Turbines & Boiler", "Excess Bagasse",
+    "Cooling Tower", "Condensate Balance", "Download", "Check Process Flow Diagrams"
 ])
 
 # ============================================================================
@@ -1629,6 +1652,60 @@ def render_tab_turb():
 
 with tab_turb:
     render_tab_turb()
+
+# ============================================================================
+# EXCESS BAGASSE TAB
+# ============================================================================
+@st.fragment
+def render_tab_bagasse():
+    st.subheader("Excess bagasse")
+    st.caption(
+        "Bagasse from the Mill Floor minus the bagasse required to generate the solved "
+        "live-steam demand. Volume is an estimate based on the selected loose bulk density."
+    )
+    bulk_density_lb_ft3 = st.number_input(
+        "Loose bagasse bulk density (lb/ft³)",
+        min_value=0.1,
+        value=7.5,
+        step=0.5,
+        format="%.1f",
+        help="Default: 7.5 lb/ft³, the typical Hugot value for loose bagasse. "
+             "Compacted or stacked bagasse will have a higher bulk density.",
+        key="bagasse_bulk_density_lb_ft3",
+    )
+
+    blrs = SOLVED.get("blrs")
+    live_steam_total_lb_hr = SOLVED.get("live_steam_total_lb_hr")
+    if not SOLVED.get("turb_ok", False) or blrs is None or live_steam_total_lb_hr is None:
+        st.info("Solve the Turbines & Boiler section to calculate boiler bagasse use and excess bagasse.")
+        return
+
+    bagasse_from_mills_lb_hr = mills.bagasse_stream.flowrate_lb_hr
+    bagasse_burned_lb_hr = live_steam_total_lb_hr / blrs.steam_available_per_lb_bagasse
+    excess_lb_hr = bagasse_from_mills_lb_hr - bagasse_burned_lb_hr
+    report = bagasse_report_table(
+        bagasse_from_mills_lb_hr, bagasse_burned_lb_hr, bulk_density_lb_ft3
+    )
+    st.dataframe(
+        report,
+        hide_index=True,
+        column_config={
+            "Ton/hr": st.column_config.NumberColumn(format="%,.2f"),
+            "TPD": st.column_config.NumberColumn(format="%,.0f"),
+            "lb/hr": st.column_config.NumberColumn(format="%,.0f"),
+            "Assumed bulk density (lb/ft³)": st.column_config.NumberColumn(format="%.1f"),
+            "Estimated volume (yd³/day)": st.column_config.NumberColumn(format="%,.0f"),
+        },
+    )
+    if excess_lb_hr >= 0:
+        st.success(f"Estimated excess bagasse: {excess_lb_hr * 24 / 2000:,.0f} TPD")
+    else:
+        st.warning(f"Estimated bagasse deficit: {-excess_lb_hr * 24 / 2000:,.0f} TPD")
+
+
+with tab_bagasse:
+    render_tab_bagasse()
+
 # ============================================================================
 # COOLING TOWER TAB
 # ============================================================================
