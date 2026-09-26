@@ -139,7 +139,7 @@ class WaterCooler:
 
 if __name__ == "__main__":
     floc_water_cooler = WaterCooler(
-        T_ci=70, T_co=80, T_hi=205, T_ho=120,
+        T_ci=90, T_co=110, T_hi=205, T_ho=120,
         gpm_h=75, psia_c=70, psia_h=40,
         U=140,  # Illustrative value; replace with the design coefficient.
     )
