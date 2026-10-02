@@ -274,6 +274,8 @@ def bagasse_report_table(bagasse_from_mills_lb_hr, bagasse_burned_lb_hr, bulk_de
 # SIDEBAR — MILL FLOOR + CLARIFICATION
 # ============================================================================
 with st.sidebar:
+    st.page_link("pages/1_Apparent_to_True.py", label="Apparent to True converter")
+    st.divider()
     solve_clicked = st.button("🔄 Solve Entire Plant", type="primary", use_container_width=True)    
     st.header("Mill Floor Inputs")
     st.subheader("Cane & Mills")
