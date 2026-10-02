@@ -1,7 +1,7 @@
 """Standalone Streamlit helper: apparent measurements -> estimated true values.
 
-Open from the sidebar when running streamlit_app.py, or run directly:
-    python -m streamlit run pages/1_Apparent_to_True.py
+Open the True Purity Estimation tab in streamlit_app.py, or run directly:
+    python -m streamlit run apparent_to_true.py
 Uses Streamlit and Matplotlib; no balance-model imports.
 
 Hoekstra correlations discussed by Love (2002), Proc S Afr Sug Technol Ass
@@ -55,11 +55,10 @@ def apparent_to_true(brix, apparent_purity, h=DEFAULT_H, measured_ds=None):
     }
 
 
-def main():
+def render_true_purity():
     import streamlit as st
 
-    st.set_page_config(page_title="Apparent to True", layout="wide")
-    st.title("Apparent to true measurements")
+    st.subheader("True Purity Estimation")
     st.caption("Hoekstra/Love correction - estimated composition of one sample.")
 
     left, right = st.columns(2)
@@ -155,4 +154,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import streamlit as st
+
+    st.set_page_config(page_title="True Purity Estimation", layout="wide")
+    render_true_purity()

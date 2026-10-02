@@ -110,14 +110,15 @@ Streamlit app.
 ## Documentation
 See the [Documentation](documentation/) folder for the User Guide and worked examples.
 
-## Apparent-to-true helper page
+## True Purity Estimation tab
 
-Run `streamlit run streamlit_app.py` and select **Apparent to True** in the sidebar.
-The page accepts refractometer Brix, apparent purity, an editable H factor
+Run `streamlit run streamlit_app.py` and select the **True Purity Estimation** tab.
+The tab accepts refractometer Brix, apparent purity, an editable H factor
 (default 0.0636), and optional measured dry solids. It shows estimated dry
 solids, sucrose, and true purity, plus curves for Brix 15 and 80. The converter
-runs independently and does not read or update the plant balance.
+uses its own fragment so editing helper inputs does not rerun the plant balance.
+Switching tabs keeps the factory inputs on the same Streamlit page.
 
-You can also run it alone with `streamlit run pages/1_Apparent_to_True.py`.
+You can also run it alone with `streamlit run apparent_to_true.py`.
 The equations, measurement basis, and provisional nature of H are explained
-on the page.
+in the helper.

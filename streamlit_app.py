@@ -15,6 +15,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
+from apparent_to_true import render_true_purity
+
 from MillFloor import MillFloor
 from Clarification import Clarification
 from clarification_diagram import _collect_streams
@@ -274,8 +276,6 @@ def bagasse_report_table(bagasse_from_mills_lb_hr, bagasse_burned_lb_hr, bulk_de
 # SIDEBAR — MILL FLOOR + CLARIFICATION
 # ============================================================================
 with st.sidebar:
-    st.page_link("pages/1_Apparent_to_True.py", label="Apparent to True converter")
-    st.divider()
     solve_clicked = st.button("🔄 Solve Entire Plant", type="primary", use_container_width=True)    
     st.header("Mill Floor Inputs")
     st.subheader("Cane & Mills")
@@ -410,10 +410,11 @@ cj = clar.clarified_juice_stream
 
 
 (tab_mill, tab_clar, tab_heat, tab_pan, tab_evap, tab_steam, tab_turb, tab_bagasse,
- tab_cool, tab_cond, tab_dl, tab_pfd) = st.tabs([
+ tab_cool, tab_cond, tab_dl, tab_pfd, tab_true_purity) = st.tabs([
     "Mill Floor", "Clarification", "Juice Heating", "Pan Floor",
     "Evaporation", "Exhaust Summary", "Turbines & Boiler", "Excess Bagasse",
-    "Cooling Tower", "Condensate Balance", "Download", "Check Process Flow Diagrams"
+    "Cooling Tower", "Condensate Balance", "Download", "Check Process Flow Diagrams",
+    "True Purity Estimation"
 ])
 
 # ============================================================================
@@ -2116,3 +2117,12 @@ def render_tab_pfd():
 
 with tab_pfd:
     render_tab_pfd()
+
+
+@st.fragment
+def render_tab_true_purity():
+    render_true_purity()
+
+
+with tab_true_purity:
+    render_tab_true_purity()
