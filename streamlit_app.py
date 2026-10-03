@@ -1610,7 +1610,8 @@ def render_tab_turb():
         turb_ok = SOLVED.get("turb_ok", False)
 
         if turb_ok:
-            live_steam_total_lb_hr = SOLVED["live_steam_total_lb_hr"]
+            # Match Excel live-steam demand: include positive exhaust makeup.
+            live_steam_total_lb_hr = SOLVED["live_steam_total_lb_hr"] + max(makeup_steam, 0.0)
             cached_aux_group_name = SOLVED.get("aux_group_name", aux_group_name)
 
             st.dataframe(pd.DataFrame(live_steam_dict.items(), columns=["Item", "lb/hr"]),
