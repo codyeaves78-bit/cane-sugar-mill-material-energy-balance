@@ -715,6 +715,17 @@ def render_tab_pan():
     else:
         pf_b_magma_brix = pf_b_remelt_brix = None
 
+    dil1, dil2 = st.columns(2)
+    pf_a_mol_dilution_brix = dil1.number_input(
+        "A molasses dilution brix", value=70.0, step=0.5, key="pf_a_mol_dilution_brix"
+    )
+    if not is_2b:
+        pf_b_mol_dilution_brix = dil2.number_input(
+            "B molasses dilution brix", value=70.0, step=0.5, key="pf_b_mol_dilution_brix"
+        )
+    else:
+        pf_b_mol_dilution_brix = None
+
     st.markdown("**Pans**")
     if is_fbdm:
         pan_defaults = [
@@ -882,6 +893,9 @@ def render_tab_pan():
                     b_magma_A2_footing_pct=b_A2_footing, c_magma_B_footing_pct=c_B_footing,
                     b_magma_brix=pf_b_magma_brix, c_magma_brix=pf_c_magma_brix,
                     b_remelt_brix=pf_b_remelt_brix, c_remelt_brix=pf_c_remelt_brix,
+                    a1_mol_dilution_brix=pf_a_mol_dilution_brix,
+                    a2_mol_dilution_brix=pf_a_mol_dilution_brix,
+                    b_mol_dilution_brix=pf_b_mol_dilution_brix,
                     injection_water_temp_F=pf_injection_water_temp_F,
                     condenser_leg_temp_drop_F=pf_condenser_leg_temp_drop_F,
                     iterations=PAN_SOLVER_ITERATIONS,
@@ -897,6 +911,8 @@ def render_tab_pan():
                     b_mol_top_off_pct=b_top_off, c_mol_top_off_pct=c_top_off,
                     b_magma_brix=pf_b_magma_brix, c_magma_brix=pf_c_magma_brix,
                     b_remelt_brix=pf_b_remelt_brix, c_remelt_brix=pf_c_remelt_brix,
+                    a_mol_dilution_brix=pf_a_mol_dilution_brix,
+                    b_mol_dilution_brix=pf_b_mol_dilution_brix,
                     injection_water_temp_F=pf_injection_water_temp_F,
                     condenser_leg_temp_drop_F=pf_condenser_leg_temp_drop_F,
                     iterations=PAN_SOLVER_ITERATIONS,
@@ -912,6 +928,8 @@ def render_tab_pan():
                     b_mol_to_grain_pct=b_to_grain, a_mol_top_off_pct=a_top_off,
                     b_mol_top_off_pct=b_top_off, c_mol_top_off_pct=c_top_off,
                     c_magma_brix=pf_c_magma_brix, c_remelt_brix=pf_c_remelt_brix,
+                    a_mol_dilution_brix=pf_a_mol_dilution_brix,
+                    b_mol_dilution_brix=pf_b_mol_dilution_brix,
                     injection_water_temp_F=pf_injection_water_temp_F,
                     condenser_leg_temp_drop_F=pf_condenser_leg_temp_drop_F,
                     iterations=PAN_SOLVER_ITERATIONS,
@@ -925,6 +943,7 @@ def render_tab_pan():
                     c_magma_remelt_pct=c_remelt, syrup_to_grain_pct=syrup_grain, syrup_to_C_pct=syrup_to_C,
                     a_mol_to_grain_pct=a_to_grain, a_mol_top_off_pct=a_top_off, c_mol_top_off_pct=c_top_off,
                     c_magma_brix=pf_c_magma_brix, c_remelt_brix=pf_c_remelt_brix,
+                    a_mol_dilution_brix=pf_a_mol_dilution_brix,
                     injection_water_temp_F=pf_injection_water_temp_F,
                     condenser_leg_temp_drop_F=pf_condenser_leg_temp_drop_F,
                     iterations=PAN_SOLVER_ITERATIONS,
