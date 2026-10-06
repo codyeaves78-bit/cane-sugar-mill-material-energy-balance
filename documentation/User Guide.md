@@ -1344,6 +1344,13 @@ All three turbines in a group share one `live_steam_object` and one `exhaust_psi
 >>> cts.neat_display()
 ```
 
+Set `water_outlet_temp_drop_F=5.0` on `CoolingTowerSystem` to apply one downleg
+ΔT to every collected pan and evaporator condenser. Downleg temperature is vapor
+saturation temperature minus ΔT (°F); it must remain above injection-water
+temperature. Omitting this argument preserves each condenser's existing setting.
+The Streamlit **Cooling Tower** section exposes **Condenser downleg ΔT (°F)**,
+defaulting to 5°F. Change it and click **Solve Entire Plant** to recalculate.
+
 producing a report shaped like (5-condenser demo from `CoolingTowerSystem.py`'s own `__main__`):
 
 ```

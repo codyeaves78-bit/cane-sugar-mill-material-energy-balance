@@ -1,5 +1,5 @@
 # Barometric condenser object for vacuum pan / evaporator systems.
-# Energy balance assumes outlet water reaches vapor saturation temperature.
+# Outlet water is below vapor saturation temperature by the specified downleg ΔT.
 # Cp of water taken as 1.0 BTU/(lb·°F) — accurate to <0.2% in the typical range.
 
 from SteamStream import EvaporatorSteam
@@ -12,12 +12,13 @@ class Condenser:
     vapor             : EvaporatorSteam or SteamStream with flow_lb_per_hr set
     water_inlet_temp_F: temperature of the injection water supply (°F)
 
-    Assumption: outlet water/condensate mixture leaves at the vapor saturation
-    temperature (perfect mixing, no sub-cooling).
+    water_outlet_temp_drop_F: downleg temperature below vapor saturation (°F),
+                             default 5. Outlet water and condensate are mixed.
 
     Energy balance:
-        m_vap × h_fg  =  m_water × Cp × (T_sat - T_water_in)
-        m_water = m_vap × h_fg / (T_sat - T_water_in)        [Cp = 1.0 BTU/lb·°F]
+        T_out = T_sat - water_outlet_temp_drop_F
+        m_vap × (h_fg + Cp × water_outlet_temp_drop_F)
+            = m_water × Cp × (T_out - T_water_in)          [Cp = 1.0 BTU/lb·°F]
     """
 
     _CP_WATER = 1.0  # BTU / (lb·°F)
@@ -75,10 +76,10 @@ class Condenser:
     def injection_water_flow_lb_hr(self):
         """Injection water required to condense the vapor (lb/hr)."""
         delta_T = (self.vapor_sat_temp_F - self.water_out_temp_drop_F) - self.water_inlet_temp_F
-        if delta_T < 0:
+        if delta_T <= 0:
             raise ValueError(
                 f"Injection water inlet ({self.water_inlet_temp_F}°F) must be "
-                f"below vapor saturation temp ({self.vapor_sat_temp_F:.2f}°F)."
+                f"below condenser downleg outlet temp ({self.water_outlet_temp_F:.2f}°F)."
             )
         return self.heat_load_btu_hr / (self._CP_WATER * delta_T)
 
