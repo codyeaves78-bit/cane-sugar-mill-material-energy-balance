@@ -1749,6 +1749,14 @@ def render_tab_cool():
         ct_makeup_water_temp = ct3.number_input("Makeup water temp (°F)", value=70.0, step=1.0)
         ct_iterations = int(ct4.number_input("Solver iterations", value=20, step=1, key="ct_iterations"))
 
+        ct_downleg_delta_t = st.number_input(
+            "Condenser downleg ΔT (°F)", min_value=0.0, value=5.0, step=1.0,
+            key="ct_downleg_delta_t",
+            help="Applies to every pan and evaporator condenser. Downleg temperature "
+                 "= vapor saturation temperature − ΔT. Must remain above the "
+                 "injection-water temperature.",
+        )
+
         if should_resolve("cool"):
             mark_resolved("cool")
             try:
@@ -1762,6 +1770,7 @@ def render_tab_cool():
                     percent_blowdown=ct_pct_blowdown,
                     makeup_water_temp_F=ct_makeup_water_temp,
                     iterations=ct_iterations,
+                    water_outlet_temp_drop_F=ct_downleg_delta_t,
                     name="Cooling Tower System",
                 )
                # ctwrs_fig = ctwrs.generate_pfd(show=False)

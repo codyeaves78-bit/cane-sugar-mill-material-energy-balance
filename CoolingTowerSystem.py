@@ -12,6 +12,8 @@
 # the flowsheet stays simple — this class only combines them, in the same
 # spirit as the Four Boiling "streams not shown" table.
 
+from math import isfinite
+
 from CoolingTower import CoolingTower
 
 
@@ -34,6 +36,9 @@ class CoolingTowerSystem:
                         water temperature is the mass/heat blend (Cp = 1) of
                         tower cool water and makeup.
     name              : display name [default 'Cooling Tower System'].
+    water_outlet_temp_drop_F : global condenser downleg temperature drop below
+                        vapor saturation temperature (°F). Default None preserves
+                        each condenser's existing setting. Must be finite and >= 0.
 
     Gathering the condensers from the balance programs::
 
@@ -67,7 +72,12 @@ class CoolingTowerSystem:
                  percent_blowdown: float = 1.0,
                  makeup_water_temp_F: float = None,
                  iterations: int = 15,
-                 name: str = 'Cooling Tower System'):
+                 name: str = 'Cooling Tower System',
+                 water_outlet_temp_drop_F: float = None):
+        if water_outlet_temp_drop_F is not None:
+            if not isfinite(water_outlet_temp_drop_F) or water_outlet_temp_drop_F < 0:
+                raise ValueError("Condenser downleg ΔT must be finite and nonnegative (°F).")
+        self.water_outlet_temp_drop_F = water_outlet_temp_drop_F
         self.name = name
         self.cool_water_temp_F = cool_water_temp_F
         self.percent_blowdown = percent_blowdown
@@ -84,6 +94,11 @@ class CoolingTowerSystem:
         # remember the inlet temps the condensers arrived solved at
         self._as_received_temps = [(n, c.water_inlet_temp_F)
                                    for n, c in self.condensers]
+
+        # Apply the global downleg setting before any water-demand calculations.
+        if water_outlet_temp_drop_F is not None:
+            for _, c in self.condensers:
+                c.water_out_temp_drop_F = water_outlet_temp_drop_F
 
         self._solve(iterations)
 
