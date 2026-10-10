@@ -318,14 +318,14 @@ with st.sidebar:
 st.divider()
 psia_col, psig_col = st.columns([1, 3])
 with psia_col:
-    fabrication_exhaust_psia = st.number_input(
+    fabrication_exhaust_reference_psia = st.number_input(
         "Fabrication exhaust pressure (psia)", value=30.0, step=1.0,
-        help="Default steam supply pressure for the juice heaters and the pre-evaporator.",
+        help="Reference conversion only; this does not change any station input.",
     )
 with psig_col:
     st.caption("psig equivalent")
     st.markdown(
-        f"<div style='font-size:1.1rem; padding-top:0.25rem;'>{fabrication_exhaust_psia - 14.696:.2f}</div>",
+        f"<div style='font-size:1.1rem; padding-top:0.25rem;'>{fabrication_exhaust_reference_psia - 14.696:.2f}</div>",
         unsafe_allow_html=True,
     )
 
@@ -512,7 +512,7 @@ def render_tab_heat():
     heater_rows = [
         {"Group": "V1 Heaters", "Steam Type": "V1", "Steam Pressure (psia)": float(DEFAULT_V1_PSIA),
          "U (Btu/hr·ft²·°F)": 200.0, "Area (ft²)": 11000.0},
-        {"Group": "Exhaust Heaters", "Steam Type": "Exhaust", "Steam Pressure (psia)": float(fabrication_exhaust_psia),
+        {"Group": "Exhaust Heaters", "Steam Type": "Exhaust", "Steam Pressure (psia)": 30.0,
          "U (Btu/hr·ft²·°F)": 200.0, "Area (ft²)": 5000.0},
     ]
     if mode == "parallel":
@@ -551,7 +551,7 @@ def render_tab_heat():
     cjh_temp = cj_cols[1].number_input("Juice out temp (°F)", value=225.0, step=1.0)
     cjh_U = cj_cols[2].number_input("U (Btu/hr·ft²·°F)", value=185.0, step=5.0)
     cjh_area = cj_cols[3].number_input("Area (ft²)", value=6000.0, step=500.0)
-    cjh_default_psia = float(DEFAULT_V1_PSIA) if cjh_steam_type == "V1" else float(fabrication_exhaust_psia)
+    cjh_default_psia = float(DEFAULT_V1_PSIA) if cjh_steam_type == "V1" else 30.0
     cjh_psia = cj_cols[4].number_input("Steam pressure (psia)", value=cjh_default_psia,
                                         step=1.0, key=f"cjh_psia_{cjh_steam_type}")
 
@@ -1069,11 +1069,14 @@ def render_tab_evap():
                    "the V1 vapor demand comes from both.")
     else:
         st.markdown("**Pre-Evaporator**")
-        pe1, pe2, pe3, pe4 = st.columns(4)
+        pe1, pe2, pe3, pe4, pe5 = st.columns(5)
         pre_active = pe1.checkbox("Pre-Evaporator active", value=True)
-        pre_area = pe2.number_input("Pre area (ft²)", value=35000.0, step=1000.0, disabled=not pre_active)
-        pre_dessin = pe3.number_input("Pre Dessin coefficient", value=18000.0, step=500.0, disabled=not pre_active)
-        pre_level = pe4.number_input("Pre liquid level (ft)", value=2.0, step=0.5, disabled=not pre_active)
+        pre_pressure_psia = pe2.number_input(
+            "Pre steam pressure (psia)", value=30.0, step=1.0, disabled=not pre_active
+        )
+        pre_area = pe3.number_input("Pre area (ft²)", value=35000.0, step=1000.0, disabled=not pre_active)
+        pre_dessin = pe4.number_input("Pre Dessin coefficient", value=18000.0, step=500.0, disabled=not pre_active)
+        pre_level = pe5.number_input("Pre liquid level (ft)", value=2.0, step=0.5, disabled=not pre_active)
 
         st.markdown("**Evaporator Sets** — add/remove rows, each row is one set. Effect *k*'s own vapor "
                     "feeds header V*k* (effect 1 → V1, effect 2 → V2, ...); the last effect never bleeds "
@@ -1081,11 +1084,11 @@ def render_tab_evap():
         set_defaults = pd.DataFrame([
             {"Active": True, "Name": "Set 1 (4-eff 25k ft²)",
              "Effect Areas (ft², comma-sep)": "25000,25000,25000,25000",
-             "Supply Steam (psia)": float(fabrication_exhaust_psia), "Last Effect (psia)": 2.4,
+             "Supply Steam (psia)": 30.0, "Last Effect (psia)": 2.4,
              "Dessin Coeff": 18000.0, "Liquid Level (ft)": 2.0},
             {"Active": True, "Name": "Set 2 (4-eff 12k ft²)",
              "Effect Areas (ft², comma-sep)": "12000,12000,12000,12000",
-             "Supply Steam (psia)": float(fabrication_exhaust_psia), "Last Effect (psia)": 2.4,
+             "Supply Steam (psia)": 30.0, "Last Effect (psia)": 2.4,
              "Dessin Coeff": 18000.0, "Liquid Level (ft)": 2.0},
             {"Active": True, "Name": "Set 3 (3-eff 11-9k ft²)",
              "Effect Areas (ft², comma-sep)": "11000,9000,9000",
@@ -1093,7 +1096,8 @@ def render_tab_evap():
              "Dessin Coeff": 18000.0, "Liquid Level (ft)": 2.0},
         ])
         sets_df = st.data_editor(
-            set_defaults, hide_index=True, use_container_width=True, num_rows="dynamic", key="evap_set_editor",
+            set_defaults, hide_index=True, use_container_width=True,
+            num_rows="dynamic", key="evap_set_editor_static",
             column_config={"Active": st.column_config.CheckboxColumn()},
         )
 
@@ -1172,7 +1176,7 @@ def render_tab_evap():
                     pre_bleed = v1_share("Pre-Evaporator")
                     pre_3 = PreEvaporator(
                         juice_in=SugarStream.copy(cj),
-                        supply_steam=EvaporatorSteam(P_psia=fabrication_exhaust_psia),
+                        supply_steam=EvaporatorSteam(P_psia=pre_pressure_psia),
                         vapor_bleed_lb_per_hr=pre_bleed,
                         area_ft2=pre_area,
                         liquid_level_ft=pre_level,
