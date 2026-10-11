@@ -1703,12 +1703,13 @@ def render_tab_bagasse():
 
     blrs = SOLVED.get("blrs")
     live_steam_total_lb_hr = SOLVED.get("live_steam_total_lb_hr")
+    makeup_steam = SOLVED.get("makeup_steam", 0.0)
     if not SOLVED.get("turb_ok", False) or blrs is None or live_steam_total_lb_hr is None:
         st.info("Solve the Turbines & Boiler section to calculate boiler bagasse use and excess bagasse.")
         return
 
     bagasse_from_mills_lb_hr = mills.bagasse_stream.flowrate_lb_hr
-    bagasse_burned_lb_hr = live_steam_total_lb_hr / blrs.steam_available_per_lb_bagasse
+    bagasse_burned_lb_hr = (live_steam_total_lb_hr + makeup_steam) / blrs.steam_available_per_lb_bagasse
     excess_lb_hr = bagasse_from_mills_lb_hr - bagasse_burned_lb_hr
     report = bagasse_report_table(
         bagasse_from_mills_lb_hr, bagasse_burned_lb_hr, bulk_density_lb_ft3
