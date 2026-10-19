@@ -69,7 +69,7 @@ st.set_page_config(page_title="Factory Balance Trial", layout="wide")
 st.title("Cane Sugar Factory Material & Energy Balance")
 st.caption("Trial Streamlit walkthrough: Mill Floor → Clarification → Juice Heating → "
            "Pan Floor → Evaporation → Steam & Exhaust Summary.")
-st.caption("Version 1.0 - last update 9/22/2026")
+st.caption("Version 1.0 - last update 10/19/2026")
 st.caption("Creator: Cody Eaves")
 
 # ============================================================================
