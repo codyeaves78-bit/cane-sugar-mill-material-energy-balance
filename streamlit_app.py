@@ -282,7 +282,7 @@ with st.sidebar:
     cane_tpd = st.number_input("Cane throughput (TPD)", value=19000.0, step=100.0)
     cane_pol_pct = st.number_input("Cane pol (%)", value=13.5, step=0.1)
     cane_fiber_pct = st.number_input("Cane fiber (%)", value=14.0, step=0.1)
-    number_of_mills = st.number_input("Number of mills", value=6, min_value=2, max_value=8, step=1)
+    number_of_mills = st.number_input("Number of mills", value=5, min_value=2, max_value=8, step=1)
     mill_1_fiber_rise_load_fraction = st.number_input(
         "Mill 1 fiber rise load fraction", value=0.35, step=0.01, format="%.2f"
     )
@@ -708,20 +708,20 @@ def render_tab_pan():
     pf_condenser_leg_temp_drop_F = ad2.number_input("Condenser leg ΔT (°F)", value=5.0, step=0.5,
                                                      key="pf_cond_leg")
     pf_c_magma_brix = ad3.number_input("C magma brix", value=92.0, step=0.5, key="pf_c_magma_brix")
-    pf_c_remelt_brix = ad4.number_input("C remelt brix", value=65.0, step=0.5, key="pf_c_remelt_brix")
+    pf_c_remelt_brix = ad4.number_input("C remelt brix", value=58.0, step=0.5, key="pf_c_remelt_brix")
     if not is_2b and not is_3b:
         pf_b_magma_brix = ad5.number_input("B magma brix", value=92.0, step=0.5, key="pf_b_magma_brix")
-        pf_b_remelt_brix = ad6.number_input("B remelt brix", value=65.0, step=0.5, key="pf_b_remelt_brix")
+        pf_b_remelt_brix = ad6.number_input("B remelt brix", value=58.0, step=0.5, key="pf_b_remelt_brix")
     else:
         pf_b_magma_brix = pf_b_remelt_brix = None
 
     dil1, dil2 = st.columns(2)
     pf_a_mol_dilution_brix = dil1.number_input(
-        "A molasses dilution brix", value=70.0, step=0.5, key="pf_a_mol_dilution_brix"
+        "A molasses dilution brix", value=77.0, step=0.5, key="pf_a_mol_dilution_brix"
     )
     if not is_2b:
         pf_b_mol_dilution_brix = dil2.number_input(
-            "B molasses dilution brix", value=70.0, step=0.5, key="pf_b_mol_dilution_brix"
+            "B molasses dilution brix", value=77.0, step=0.5, key="pf_b_mol_dilution_brix"
         )
     else:
         pf_b_mol_dilution_brix = None
@@ -730,19 +730,19 @@ def render_tab_pan():
     if is_fbdm:
         pan_defaults = [
             dict(Grade="A1", **{"Heating Surface (ft²)": 16000.0, "Vacuum (in Hg)": 23.5, "Supersaturation": 1.2,
-                                 "Head (ft)": 2.0, "Masse Brix": 92.0, "Mother Liquor Purity": 75.0,
+                                 "Head (ft)": 2.0, "Masse Brix": 92.0, "Mother Liquor Purity": 78.0,
                                  "Calandria (psia)": 21.696, "Heat Loss Factor": 0.02, "Steam Type": "V1"}),
             dict(Grade="A2", **{"Heating Surface (ft²)": 6000.0, "Vacuum (in Hg)": 23.5, "Supersaturation": 1.2,
-                                 "Head (ft)": 2.0, "Masse Brix": 92.0, "Mother Liquor Purity": 70.0,
+                                 "Head (ft)": 2.0, "Masse Brix": 92.0, "Mother Liquor Purity": 75.0,
                                  "Calandria (psia)": 21.696, "Heat Loss Factor": 0.02, "Steam Type": "V1"}),
             dict(Grade="B", **{"Heating Surface (ft²)": 7500.0, "Vacuum (in Hg)": 25.0, "Supersaturation": 1.2,
-                                "Head (ft)": 2.0, "Masse Brix": 94.0, "Mother Liquor Purity": 52.0,
+                                "Head (ft)": 2.0, "Masse Brix": 94.0, "Mother Liquor Purity": 58.0,
                                 "Calandria (psia)": 29.696, "Heat Loss Factor": 0.05, "Steam Type": "Exhaust"}),
             dict(Grade="Grain", **{"Heating Surface (ft²)": 3000.0, "Vacuum (in Hg)": 25.5, "Supersaturation": 1.2,
-                                    "Head (ft)": 2.0, "Masse Brix": 88.0, "Mother Liquor Purity": 45.0,
+                                    "Head (ft)": 2.0, "Masse Brix": 88.0, "Mother Liquor Purity": 48.0,
                                     "Calandria (psia)": 29.696, "Heat Loss Factor": 0.05, "Steam Type": "Exhaust"}),
             dict(Grade="C", **{"Heating Surface (ft²)": 12000.0, "Vacuum (in Hg)": 26.5, "Supersaturation": 1.2,
-                                "Head (ft)": 2.0, "Masse Brix": 95.5, "Mother Liquor Purity": 33.0,
+                                "Head (ft)": 2.0, "Masse Brix": 95.5, "Mother Liquor Purity": 38.0,
                                 "Calandria (psia)": 21.696, "Heat Loss Factor": 0.05, "Steam Type": "V1"}),
         ]
         cen_defaults = [
@@ -758,16 +758,16 @@ def render_tab_pan():
     elif is_tbdm or is_3b:
         pan_defaults = [
             dict(Grade="A", **{"Heating Surface (ft²)": 22500.0, "Vacuum (in Hg)": 23.5, "Supersaturation": 1.2,
-                                "Head (ft)": 2.0, "Masse Brix": 92.0, "Mother Liquor Purity": 73.0,
+                                "Head (ft)": 2.0, "Masse Brix": 92.0, "Mother Liquor Purity": 76.0,
                                 "Calandria (psia)": 21.696, "Heat Loss Factor": 0.02, "Steam Type": "V1"}),
             dict(Grade="B", **{"Heating Surface (ft²)": 7500.0, "Vacuum (in Hg)": 25.0, "Supersaturation": 1.2,
-                                "Head (ft)": 2.0, "Masse Brix": 94.0, "Mother Liquor Purity": 53.0,
+                                "Head (ft)": 2.0, "Masse Brix": 94.0, "Mother Liquor Purity": 58.0,
                                 "Calandria (psia)": 29.696, "Heat Loss Factor": 0.05, "Steam Type": "Exhaust"}),
             dict(Grade="Grain", **{"Heating Surface (ft²)": 3000.0, "Vacuum (in Hg)": 25.5, "Supersaturation": 1.2,
-                                    "Head (ft)": 2.0, "Masse Brix": 88.0, "Mother Liquor Purity": 45.0,
+                                    "Head (ft)": 2.0, "Masse Brix": 88.0, "Mother Liquor Purity": 48.0,
                                     "Calandria (psia)": 29.696, "Heat Loss Factor": 0.05, "Steam Type": "Exhaust"}),
             dict(Grade="C", **{"Heating Surface (ft²)": 12000.0, "Vacuum (in Hg)": 26.5, "Supersaturation": 1.2,
-                                "Head (ft)": 2.0, "Masse Brix": 95.5, "Mother Liquor Purity": 33.0,
+                                "Head (ft)": 2.0, "Masse Brix": 95.5, "Mother Liquor Purity": 38.0,
                                 "Calandria (psia)": 21.696, "Heat Loss Factor": 0.05, "Steam Type": "V1"}),
         ]
         cen_defaults = [
@@ -781,13 +781,13 @@ def render_tab_pan():
     else:  # Two Boiling — no B pans/centrifugals
         pan_defaults = [
             dict(Grade="A", **{"Heating Surface (ft²)": 22500.0, "Vacuum (in Hg)": 23.5, "Supersaturation": 1.2,
-                                "Head (ft)": 2.0, "Masse Brix": 92.0, "Mother Liquor Purity": 55.0,
+                                "Head (ft)": 2.0, "Masse Brix": 92.0, "Mother Liquor Purity": 70.0,
                                 "Calandria (psia)": 21.696, "Heat Loss Factor": 0.02, "Steam Type": "V1"}),
             dict(Grade="Grain", **{"Heating Surface (ft²)": 3000.0, "Vacuum (in Hg)": 25.5, "Supersaturation": 1.2,
                                     "Head (ft)": 2.0, "Masse Brix": 88.0, "Mother Liquor Purity": 45.0,
                                     "Calandria (psia)": 29.696, "Heat Loss Factor": 0.05, "Steam Type": "Exhaust"}),
             dict(Grade="C", **{"Heating Surface (ft²)": 12000.0, "Vacuum (in Hg)": 26.5, "Supersaturation": 1.2,
-                                "Head (ft)": 2.0, "Masse Brix": 95.5, "Mother Liquor Purity": 30.0,
+                                "Head (ft)": 2.0, "Masse Brix": 95.5, "Mother Liquor Purity": 35.0,
                                 "Calandria (psia)": 21.696, "Heat Loss Factor": 0.05, "Steam Type": "V1"}),
         ]
         cen_defaults = [
@@ -804,7 +804,7 @@ def render_tab_pan():
     st.markdown("**C Crystallizer / Reheater** (low-grade cooling train)")
     cc1, cc2, cc3 = st.columns(3)
     cryst_temp_out = cc1.number_input("Crystallizer masse out (°F)", value=120.0, step=1.0)
-    cryst_ml_purity_out = cc2.number_input("Crystallizer Mother Liquor Purity out (%)", value=30.0, step=1.0)
+    cryst_ml_purity_out = cc2.number_input("Crystallizer Mother Liquor Purity out (%)", value=38.0, step=1.0)
     reheat_temp_out = cc3.number_input("Reheater masse out (°F)", value=140.0, step=1.0)
     st.caption("Cooling water fixed 85→105°F, reheat water fixed 150→135°F.")
 
@@ -830,14 +830,14 @@ def render_tab_pan():
         s5, s6, s7, s8 = st.columns(4)
         a2_to_grain = s5.number_input("A2 mol to grain (%)", value=0.0)
         b_to_grain = s6.number_input("B mol to grain (%)", value=10.0)
-        b_A1_footing = s7.number_input("B magma A1 footing (%)", value=40.0)
-        b_A2_footing = s8.number_input("B magma A2 footing (%)", value=40.0)
+        b_A1_footing = s7.number_input("B magma A1 footing (%)", value=10.0)
+        b_A2_footing = s8.number_input("B magma A2 footing (%)", value=10.0)
         s9, s10 = st.columns(2)
-        c_B_footing = s9.number_input("C magma B footing (%)", value=80.0)
+        c_B_footing = s9.number_input("C magma B footing (%)", value=84.0)
     elif is_tbdm:
         s1, s2, s3, s4 = st.columns(4)
-        c_remelt = s1.number_input("C magma remelt (%)", value=20.0)
-        b_remelt = s2.number_input("B magma remelt (%)", value=20.0)
+        c_remelt = s1.number_input("C magma remelt (%)", value=16.0)
+        b_remelt = s2.number_input("B magma remelt (%)", value=80.0)
         syrup_grain = s3.number_input("Syrup to grain (%)", value=1.0)
         a_to_grain = s4.number_input("A mol to grain (%)", value=3.0)
         s5, s6, s7, s8 = st.columns(4)
@@ -1072,7 +1072,7 @@ def render_tab_evap():
         pe1, pe2, pe3, pe4, pe5 = st.columns(5)
         pre_active = pe1.checkbox("Pre-Evaporator active", value=True)
         pre_pressure_psia = pe2.number_input(
-            "Pre steam pressure (psia)", value=30.0, step=1.0, disabled=not pre_active
+            "Pre steam pressure (psia)", value=28.7, step=1.0, disabled=not pre_active
         )
         pre_area = pe3.number_input("Pre area (ft²)", value=35000.0, step=1000.0, disabled=not pre_active)
         pre_dessin = pe4.number_input("Pre Dessin coefficient", value=18000.0, step=500.0, disabled=not pre_active)
@@ -1084,13 +1084,13 @@ def render_tab_evap():
         set_defaults = pd.DataFrame([
             {"Active": True, "Name": "Set 1 (4-eff 25k ft²)",
              "Effect Areas (ft², comma-sep)": "25000,25000,25000,25000",
-             "Supply Steam (psia)": 30.0, "Last Effect (psia)": 2.4,
+             "Supply Steam (psia)": 29.7, "Last Effect (psia)": 2.4,
              "Dessin Coeff": 18000.0, "Liquid Level (ft)": 2.0},
             {"Active": True, "Name": "Set 2 (4-eff 12k ft²)",
              "Effect Areas (ft², comma-sep)": "12000,12000,12000,12000",
-             "Supply Steam (psia)": 30.0, "Last Effect (psia)": 2.4,
+             "Supply Steam (psia)": 29.7, "Last Effect (psia)": 2.4,
              "Dessin Coeff": 18000.0, "Liquid Level (ft)": 2.0},
-            {"Active": True, "Name": "Set 3 (3-eff 11-9k ft²)",
+            {"Active": False, "Name": "Set 3 (3-eff 11-9k ft²)",
              "Effect Areas (ft², comma-sep)": "11000,9000,9000",
              "Supply Steam (psia)": 20.0, "Last Effect (psia)": 2.4,
              "Dessin Coeff": 18000.0, "Liquid Level (ft)": 2.0},
